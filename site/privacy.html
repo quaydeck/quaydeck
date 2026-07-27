@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy - Quaydeck</title>
+<meta name="description" content="Exactly what Quaydeck reads, stores and sends. It is short, because the app does very little.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230B1F33'/><circle cx='50' cy='50' r='26' fill='none' stroke='%23F1C47B' stroke-width='7'/></svg>">
+<style>
+  :root {
+    --navy-900: #08192a;
+    --navy-850: #0b2135;
+    --brass:    #f1c47b;
+    --water:    #47a7a6;
+    --ink:      #eaf1f7;
+    --muted:    #8ea5b8;
+    --line:     rgba(234, 241, 247, .12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--navy-900); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: min(680px, calc(100% - 2.5rem)); margin-inline: auto; padding-bottom: 4rem; }
+  a { color: var(--brass); text-underline-offset: 3px; }
+  nav { display: flex; align-items: center; gap: .6rem; padding: 1.5rem 0; font-size: .9rem; }
+  nav a {
+    color: var(--muted); text-decoration: none; font-weight: 620;
+    display: flex; align-items: center; gap: .6rem; min-height: 44px;
+  }
+  nav a:hover { color: var(--ink); }
+  h1 { font-size: clamp(2rem, 5vw, 2.75rem); letter-spacing: -.03em; line-height: 1.08; font-weight: 740; margin: 2rem 0 .6rem; }
+  .updated { color: var(--muted); font-size: .9rem; margin: 0 0 2.5rem; }
+  h2 { font-size: 1.2rem; letter-spacing: -.015em; font-weight: 680; margin: 2.5rem 0 .7rem; }
+  p, li { color: #c9d8e5; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+  li b, p b { color: var(--ink); }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: .87em;
+  }
+  pre {
+    background: var(--navy-850); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1rem 1.15rem; overflow-x: auto; color: #cfe0ee;
+  }
+  .lead { font-size: 1.12rem; color: var(--muted); margin: 0 0 1rem; }
+  footer { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.5rem; color: var(--muted); font-size: .9rem; }
+  footer a {
+    color: var(--muted); text-decoration: none;
+    display: inline-flex; align-items: center; min-height: 44px;
+  }
+  footer a:hover { color: var(--ink); }
+  /* Links inside a sentence cannot be 44px tall without wrecking the paragraph.
+     WCAG 2.5.8 exempts inline targets; this keeps them past its 24px floor. */
+  p a, li a { padding-block: .2rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <a href="/">
+    <svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true">
+      <rect width="100" height="100" rx="23" fill="#0f2a40"/>
+      <circle cx="50" cy="50" r="25" fill="none" stroke="#f1c47b" stroke-width="6.5"/>
+      <path d="M28 54a44 44 0 0 1 44 0v16a25 25 0 0 1-44 0Z" fill="#47a7a6" opacity=".85"/>
+    </svg>
+    Quaydeck
+  </a>
+</nav>
+
+<main>
+<h1>Privacy</h1>
+<p class="updated">Last updated 27 July 2026</p>
+
+<p class="lead">
+  Quaydeck is a menu bar utility that shows which ports are listening on your Mac. This
+  page describes exactly what it reads, what it stores and what it sends. It is short
+  because the app does very little.
+</p>
+
+<h2>What Quaydeck sends</h2>
+<p>Two things, and nothing else.</p>
+<ul>
+  <li>
+    <b>HTTP GET requests to localhost on your own machine.</b> For each dev server it
+    finds, Quaydeck requests <code>http://localhost:&lt;port&gt;/</code> to learn whether
+    the server is answering, what status code it returns and what its page title is.
+    These requests never leave your computer.
+  </li>
+  <li>
+    <b>Update checks, if you leave them on.</b> Quaydeck asks a feed for the current
+    version number. This is an ordinary HTTPS request carrying no identifier for you or
+    your machine beyond what any HTTP request carries. Switch it off in Settings.
+  </li>
+</ul>
+<p>
+  There is no account, no sign-in, no analytics, no crash reporting, no usage statistics
+  and no server belonging to Quaydeck that holds anything about you.
+</p>
+
+<h2>What Quaydeck reads</h2>
+<p>All of this stays on your Mac.</p>
+<ul>
+  <li><b>Listening TCP sockets</b>, via <code>lsof</code>: port numbers, the process holding each one, and whether it is bound to loopback or to every interface.</li>
+  <li><b>Process details</b>, via <code>ps</code>: process id, parent, command line, elapsed time, CPU and memory. The parent chain is walked to see whether a coding agent started a server.</li>
+  <li><b>Project files</b>, for servers it can trace to a directory: <code>package.json</code> for the name and dependencies, and the presence of files like <code>go.mod</code>, <code>Cargo.toml</code> and <code>Gemfile</code>.</li>
+  <li><b>Git state</b>, via <code>git</code>: the current branch and whether there are uncommitted changes to tracked files.</li>
+</ul>
+
+<h2>What Quaydeck stores</h2>
+<p>In <code>UserDefaults</code>, under <code>app.quaydeck.Quaydeck</code>, on your Mac only:</p>
+<ul>
+  <li>which projects you pinned</li>
+  <li>up to 30 recently-seen projects, with path, name, framework and last port, so they can be restarted after they stop</li>
+  <li>any project folders you added in Settings</li>
+  <li>whether notifications and automatic update checks are on</li>
+  <li>whether you have seen the welcome screen</li>
+</ul>
+<p>Delete all of it with:</p>
+<pre>defaults delete app.quaydeck.Quaydeck</pre>
+
+<h2>Permissions Quaydeck asks for</h2>
+<ul>
+  <li><b>Notifications</b>, only if you switch them on. Off by default.</li>
+  <li><b>Automation (Terminal)</b>, only when you use "Restart in Terminal". macOS asks the first time, and declining simply disables that one action.</li>
+  <li><b>Start at login</b>, only if you tick the box. Quaydeck never registers itself.</li>
+</ul>
+
+<h2>Sandbox</h2>
+<p>
+  Quaydeck is not sandboxed, because reading the system process table and stopping
+  processes it did not start are both forbidden inside the App Sandbox. It is signed
+  with an Apple Developer ID and notarised by Apple. The source is public, so you can
+  read every system call it makes.
+</p>
+
+<h2>Questions</h2>
+<p>
+  Open an issue at
+  <a href="https://github.com/quaydeck/quaydeck/issues">github.com/quaydeck/quaydeck</a>.
+</p>
+
+</main>
+
+<footer>
+  <a href="/">Back to Quaydeck</a>
+</footer>
+
+</div>
+</body>
+</html>
