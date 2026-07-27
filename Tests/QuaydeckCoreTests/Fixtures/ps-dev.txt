@@ -1,0 +1,9 @@
+ 1001   900       05:12   1.2  184320 node /Users/dev/code/acme-site/node_modules/.bin/vite --port 5173
+ 1002   901    01:04:22   0.4  215040 node /Users/dev/code/shop/node_modules/.bin/astro dev
+ 1003   902       00:31   0.9  198656 node /Users/dev/code/shop/node_modules/.bin/astro dev --port 4322
+ 1004   903  2-03:14:00   0.0   12288 /opt/homebrew/bin/python3 -m http.server 8000
+ 1005     1 10-00:00:00   0.1   66560 /opt/homebrew/opt/postgresql@16/bin/postgres -D /opt/homebrew/var/postgresql@16
+ 1006     1 10-00:00:00   0.0   12288 /opt/homebrew/opt/redis/bin/redis-server 127.0.0.1:6379
+ 1007     1       00:15  95.0   40960 /tmp/.hidden/miner --stratum pool.example.net:4444
+ 1008   904    03:22:10   0.2  327680 /Users/dev/.rbenv/versions/3.3.0/bin/ruby bin/rails server
+ 1009     1  5-01:02:03   0.3  102400 /Applications/Docker.app/Contents/MacOS/com.docker.backend -watchdog

@@ -1,0 +1,8 @@
+  630     1 03-14:23:35   0.0   9152 /usr/libexec/rapportd
+  752     1 03-14:23:33   0.0  31600 /Applications/Raycast.app/Contents/MacOS/Raycast
+  895   758 03-14:23:30   0.0  32784 /Applications/Google Drive.app/Contents/MacOS/Google Drive --single_process --parent_version=125.0.0.0 --crash_handler_token=inherited
+ 4153   752 03-09:55:33   0.0   3984 /opt/homebrew/bin/ollama serve
+ 4192     1 03-09:55:26   0.0  48576 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+ 6811  6733    01:27:10   0.0  11104 /Library/Developer/CoreSimulator/Volumes/tvOS_23L470/Library/Developer/CoreSimulator/Profiles/Runtimes/tvOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/rapportd
+11297     1    01:12:39   0.1  34432 /System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter
+16615  6733    01:08:11   0.0  22016 /Users/dev/Library/Developer/CoreSimulator/Devices/00000000-0000-0000-0000-000000000001/data/Containers/Bundle/Application/00000000-0000-0000-0000-000000000002/SampleTV.app/SampleTV

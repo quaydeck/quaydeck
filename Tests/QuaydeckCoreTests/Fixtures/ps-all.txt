@@ -1,0 +1,16 @@
+    1     8192     0:12.44 /sbin/launchd
+  412    18432     1:03.10 /usr/libexec/UserEventAgent (System)
+  630     9152     0:04.02 /usr/libexec/rapportd
+  752    31600    12:44.31 /Applications/Example Launcher.app/Contents/MacOS/Example Launcher
+  895    32784     3:20.55 /Applications/Cloud Sync.app/Contents/MacOS/Cloud Sync --single_process --parent_version=1.2.3
+ 1001   184320     0:41.12 node /Users/dev/code/acme-site/node_modules/.bin/vite --port 5173
+ 1002   215040     4:02.90 node /Users/dev/code/shop/node_modules/.bin/astro dev
+ 2201    98304  1-04:15:00 node /Users/dev/code/docs-site/node_modules/.bin/tsc --watch --noEmit
+ 2202  1998848     0:31.07 node /Users/dev/code/docs-site/node_modules/.bin/webpack --watch
+ 2203    45056     0:02.10 node /Users/dev/code/shop/node_modules/.bin/esbuild --serve
+ 3301    22016     0:00.90 /Users/dev/.claude/local/claude --resume
+ 3302   131072     8:10.00 /Applications/Some Editor.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+ 3303    65536     2:04.00 node /Users/dev/code/shop/node_modules/typescript/lib/tsserver.js --stdio
+ 3304    40960     0:15.00 node /Users/dev/.local/share/mcp/some-mcp-server/index.js
+ 4153     3984    22:31.09 /opt/homebrew/bin/ollama serve
+ 5501    12288     0:00.05 python3 -m http.server 8000
