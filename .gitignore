@@ -7,3 +7,4 @@ dist/
 .DS_Store
 Package.resolved.local
 Scripts/.notary-profile
+site/.vercel/
