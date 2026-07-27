@@ -19,6 +19,21 @@ public protocol HealthProbing: Sendable {
     func probe(port: Int) async -> HealthResult
 }
 
+/// Declines every HTTP redirect, so a probe of localhost can never turn into a
+/// request to somewhere else.
+final class RefuseRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = RefuseRedirects()
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        // nil means "do not follow", and the redirect response itself is returned.
+        completionHandler(nil)
+    }
+}
+
 /// Fetches the page title and status of a local server.
 ///
 /// Uses "localhost" rather than 127.0.0.1 so a server bound only to [::1] still
@@ -45,7 +60,14 @@ public struct HealthProbe: HealthProbing {
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout + 0.5
         configuration.httpCookieStorage = nil
-        let session = URLSession(configuration: configuration)
+        // Redirects are refused rather than followed. URLSession follows them by
+        // default, so a local server answering 302 to an external URL would make
+        // Quaydeck fetch it, quietly breaking the promise that nothing leaves the
+        // machine. Refusing keeps that promise true rather than merely intended.
+        let session = URLSession(configuration: configuration,
+                                 delegate: RefuseRedirects.shared,
+                                 delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
 
         do {
             let (data, response) = try await session.data(for: request)

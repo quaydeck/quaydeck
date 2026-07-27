@@ -93,10 +93,24 @@ public struct SystemActions {
                 : packageHasScript("start", at: projectPath) ? "start" : "dev"
             return "cd \(Self.quoteForShell(projectPath)) && \(manager) run \(script)"
         }
-        if let fallbackArgs, let directory = cwd ?? projectPath, !fallbackArgs.isEmpty {
+        // Fallback: re-run whatever the process was launched with. That string comes
+        // from `ps`, so it is chosen by the process rather than by us, and it lands in
+        // a shell unquoted. Anything carrying shell syntax is refused rather than
+        // executed: a crafted argv would otherwise turn one click into arbitrary
+        // commands. A normal dev invocation contains none of these characters.
+        if let fallbackArgs, let directory = cwd ?? projectPath,
+           !fallbackArgs.isEmpty, !Self.containsShellSyntax(fallbackArgs) {
             return "cd \(Self.quoteForShell(directory)) && \(fallbackArgs)"
         }
         return nil
+    }
+
+    static let shellMetacharacters: Set<Character> = [
+        ";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r", "\\", "\"", "'",
+    ]
+
+    static func containsShellSyntax(_ text: String) -> Bool {
+        text.contains { shellMetacharacters.contains($0) }
     }
 
     private func packageHasScript(_ name: String, at path: String) -> Bool {
