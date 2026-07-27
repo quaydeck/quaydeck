@@ -8,3 +8,4 @@ dist/
 Package.resolved.local
 Scripts/.notary-profile
 site/.vercel/
+Scripts/.release-env

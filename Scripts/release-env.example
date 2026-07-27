@@ -1,0 +1,17 @@
+# Copy to Scripts/.release-env (gitignored) and fill in.
+# Nothing here is a private key, but these identify your Apple developer account
+# and there is no reason to publish them.
+
+# App Store Connect API key, from
+# https://appstoreconnect.apple.com/access/integrations/api
+# The matching AuthKey_<id>.p8 must sit in ~/.appstoreconnect/private_keys/
+ASC_KEY_ID=
+ASC_ISSUER_ID=
+
+# Optional: pin a signing identity instead of taking the first Developer ID found.
+# QUAYDECK_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+
+# Sparkle. Generate once with the generate_keys tool in .build/artifacts/, then put
+# the printed public key here. Without both of these the app ships without an updater.
+# QUAYDECK_FEED_URL=https://quaydeck.app/appcast.xml
+# QUAYDECK_PUBLIC_KEY=

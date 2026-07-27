@@ -30,6 +30,8 @@ enum DevMachine {
             "/Users/dev/code/shop",
             "/Users/dev/code/shop/.git",
             "/Users/dev/code/notes",
+            "/Users/dev/code/docs-site",
+            "/Users/dev/code/docs-site/.git",
             "/Users/dev/code/rails-app",
             "/Users/dev/code/rails-app/.git",
             "/tmp",
@@ -41,6 +43,7 @@ enum DevMachine {
             "/Users/dev/code/shop/package.json":
                 #"{"name":"shop","dependencies":{"astro":"^4.0.0"}}"#,
             "/Users/dev/code/notes/pyproject.toml": "[project]\nname = \"notes\"\n",
+            "/Users/dev/code/docs-site/package.json": #"{"name":"docs-site"}"#,
             "/Users/dev/code/rails-app/Gemfile": "source 'https://rubygems.org'\n",
         ]
     )
