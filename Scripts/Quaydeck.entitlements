@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Quaydeck is deliberately not sandboxed. It has to read the system process table
+    and signal processes it did not start, neither of which the App Sandbox permits.
+    That also means it cannot ship on the Mac App Store, which is why it is
+    distributed directly, signed with a Developer ID and notarised.
+  -->
+
+  <!--
+    Required under the hardened runtime to drive Terminal for "Restart in Terminal".
+    Without it that action fails silently.
+  -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>
