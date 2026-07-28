@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Quaydeck</title>
+    <link>https://quaydeck.vercel.app/appcast.xml</link>
+    <description>Quaydeck release feed</description>
+    <language>en</language>
+    <item>
+      <title>1.0.0</title>
+      <pubDate>Tue, 28 Jul 2026 21:38:17 +0000</pubDate>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://github.com/quaydeck/quaydeck/releases/tag/v1.0.0</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/quaydeck/quaydeck/releases/download/v1.0.0/Quaydeck-1.0.0.dmg"
+                 sparkle:version="1.0.0"
+                 sparkle:shortVersionString="1.0.0"
+                 length="2668336"
+                 type="application/octet-stream"
+                 sparkle:edSignature="z9+VsED59P0QDZ2B3baev+Lsa2pCwmgDYd5DzZ9roBuVUTPXnEQ7gJm9IRKWi2zSKFOk7cR2I9ODyoBonTMNAQ==" />
+    </item>
+  </channel>
+</rss>

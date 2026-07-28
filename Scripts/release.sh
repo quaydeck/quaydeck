@@ -26,7 +26,13 @@ DMG="$DIST/$NAME-$VERSION.dmg"
 # Local, untracked settings: App Store Connect ids, signing identity, Sparkle key.
 # Copy Scripts/release-env.example to Scripts/.release-env and fill it in.
 # These are account identifiers, not secrets, but they do not belong in a public repo.
-[ -f "$ROOT/Scripts/.release-env" ] && . "$ROOT/Scripts/.release-env"
+# set -a exports everything the file assigns, so build-app.sh (a child process)
+# sees QUAYDECK_FEED_URL, QUAYDECK_PUBLIC_KEY and QUAYDECK_SIGN_IDENTITY too.
+if [ -f "$ROOT/Scripts/.release-env" ]; then
+  set -a
+  . "$ROOT/Scripts/.release-env"
+  set +a
+fi
 
 : "${ASC_KEY_PATH:=$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID:-}.p8}"
 : "${QUAYDECK_DOWNLOAD_BASE:=https://github.com/quaydeck/quaydeck/releases/download}"
@@ -106,7 +112,9 @@ PUBLISHED="$(date -u '+%a, %d %b %Y %H:%M:%S +0000')"
 if [ -n "$SIGN_UPDATE" ]; then
   say "Signing the update for Sparkle"
   if SIGNATURE_LINE="$("$SIGN_UPDATE" "$DMG" 2>/dev/null)"; then
-    :
+    # sign_update emits its own length="..." and the template below adds one
+    # too, which is a duplicate attribute and therefore invalid XML.
+    SIGNATURE_LINE="${SIGNATURE_LINE% length=*}"
   else
     SIGNATURE_LINE=""
     say "  no Sparkle key yet. Create one once with:"
