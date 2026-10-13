@@ -143,6 +143,62 @@ final class HostsTests: XCTestCase {
         XCTAssertEqual(runner.calls.map(\.arguments), [["stop", "abc123"]])
     }
 
+    // MARK: - Git
+
+    func testReadsBranchAndDirtyStateFromOneStatusCall() {
+        let clean = GitInspector.parse("# branch.oid 4b47\n# branch.head main\n# branch.upstream origin/main\n")
+        XCTAssertEqual(clean, GitInspector.Status(branch: "main", dirty: false))
+        let dirty = GitInspector.parse("# branch.head feat/x\n1 .M N... 100644 100644 100644 a b src/app.ts\n")
+        XCTAssertEqual(dirty, GitInspector.Status(branch: "feat/x", dirty: true))
+        XCTAssertEqual(GitInspector.parse("# branch.head (detached)\n"), .unknown)
+        XCTAssertEqual(GitInspector.parse(""), .unknown, "not a repository")
+    }
+
+    // MARK: - Kernel
+
+    /// Opens real sockets and checks the kernel path sees them exactly as lsof would.
+    func testTheKernelSeesAListeningSocketAndWhereItIsBound() throws {
+        let loopback = try listeningSocket(any: false)
+        defer { close(loopback.fd) }
+        let everywhere = try listeningSocket(any: true)
+        defer { close(everywhere.fd) }
+
+        let mine = KernelSource().listeners().filter { $0.pid == getpid() }
+        XCTAssertEqual(mine.first { $0.port == loopback.port }?.exposed, false)
+        XCTAssertEqual(mine.first { $0.port == everywhere.port }?.exposed, true)
+    }
+
+    func testTheKernelDescribesAProcessLikePs() throws {
+        let kernel = KernelSource()
+        let me = try XCTUnwrap(kernel.process(getpid()))
+        XCTAssertEqual(me.ppid, getppid())
+        XCTAssertTrue(me.args.contains("xctest") || me.args.contains("Test"), me.args)
+        XCTAssertGreaterThan(me.rssKB, 0)
+        XCTAssertEqual(kernel.workingDirectory(of: getpid()), FileManager.default.currentDirectoryPath)
+        XCTAssertEqual(KernelSource.etime(90_061), "01-01:01:01")
+        XCTAssertEqual(KernelSource.etime(61), "01:01")
+    }
+
+    private func listeningSocket(any: Bool) throws -> (fd: Int32, port: Int) {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EBADF) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = any ? INADDR_ANY : UInt32(0x7F00_0001).bigEndian
+        address.sin_port = 0
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0, Darwin.listen(fd, 1) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
+        }
+        return (fd, Int(UInt16(bigEndian: address.sin_port)))
+    }
+
     // MARK: - Folders
 
     func testNamesTheFolderAProjectlessServerServes() {

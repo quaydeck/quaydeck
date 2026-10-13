@@ -37,8 +37,10 @@ one.
   named after its compose project, with its published ports and health. Stopping one
   stops that container, never Docker itself.
 
-Everything it knows, it read from your own machine with `lsof`, `ps` and, when
-Docker is running, `docker ps`.
+Everything it knows, it reads from your own Mac: the kernel's socket and process tables
+(the same data `lsof` and `ps` show, read directly instead of by starting them), and
+`docker ps` when Docker is running. A scan costs about 15 ms of CPU, every 20 seconds
+while the menu is closed, and stops while your screens sleep.
 
 ## Install
 
@@ -88,8 +90,9 @@ Tests/
     Fixtures/     recorded lsof and ps output
 ```
 
-The important seam is `CommandRunner`. Every call out to `lsof`, `ps`, `git` and `kill`
-goes through it, so the entire scan pipeline can be driven from recorded output:
+The important seam is `CommandRunner`. On a real Mac, sockets and processes come straight
+from the kernel (`KernelSource`); give the inventory a recorded runner instead and the same
+pipeline reads `lsof` and `ps` output, so it can be driven entirely from recordings:
 
 ```swift
 let inventory = PortInventory(

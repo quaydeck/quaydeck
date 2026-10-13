@@ -95,9 +95,18 @@ final class AdvisorTests: XCTestCase {
 
     // MARK: - Ordering and identity
 
+    /// Bound to this Mac only, an unrecognised listener is worth a look, not an alarm.
+    func testAnUnrecognisedListenerOnLoopbackIsAWarning() {
+        var helper = LocalServer(port: 60741, pid: 98, command: "helper", args: "/tmp/h", cwd: "/tmp")
+        helper.kind = .unrecognised
+        let advice = advisor.build(from: Snapshot(servers: [helper]))
+        XCTAssertEqual(advice.first { $0.kind == .unrecognised }?.severity, .warning)
+    }
+
     func testCriticalAdviceSortsFirst() {
         var miner = LocalServer(port: 31337, pid: 99, command: "miner", args: "/tmp/x", cwd: "/tmp")
         miner.kind = .unrecognised
+        miner.exposed = true
         let stale = devServer(port: 4321, cpu: 0, etime: "3-00:00:00")
 
         let advice = advisor.build(from: Snapshot(servers: [stale, miner]))

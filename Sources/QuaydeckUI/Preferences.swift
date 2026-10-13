@@ -86,15 +86,23 @@ public final class Preferences: ObservableObject {
 
     private static let historyLimit = 30
 
+    /// Called after every scan. Writes to disk only when an entry really changed, or
+    /// when its "last seen" has gone ten minutes stale; rewriting the whole list on
+    /// every scan kept UserDefaults and the menu busy for nothing.
     public func rememberRunning(_ servers: [LocalServer]) {
         var byPath = Dictionary(history.map { ($0.projectPath, $0) }, uniquingKeysWith: { first, _ in first })
         let now = Date()
+        var changed = false
         for server in servers where server.isDevServer {
             guard let path = server.projectPath, let name = server.project else { continue }
+            if let known = byPath[path], known.project == name, known.framework == server.framework,
+               known.lastPort == server.port, now.timeIntervalSince(known.lastSeen) < 600 { continue }
             byPath[path] = HistoryEntry(projectPath: path, project: name,
                                         framework: server.framework, lastPort: server.port,
                                         lastSeen: now)
+            changed = true
         }
+        guard changed else { return }
         history = Array(byPath.values.sorted { $0.lastSeen > $1.lastSeen }.prefix(Self.historyLimit))
     }
 

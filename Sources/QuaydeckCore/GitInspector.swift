@@ -22,29 +22,41 @@ public final class GitInspector: @unchecked Sendable {
         self.ttl = ttl
     }
 
-    public func status(at path: String, now: Date = Date()) -> Status {
+    /// `maxAge` overrides the default lifetime for one call: long while the menu is
+    /// closed and nobody can see a branch name anyway.
+    public func status(at path: String, now: Date = Date(), maxAge: TimeInterval? = nil) -> Status {
         lock.lock()
-        if let cached = cache[path], now.timeIntervalSince(cached.at) < ttl {
+        if let cached = cache[path], now.timeIntervalSince(cached.at) < (maxAge ?? ttl) {
             lock.unlock()
             return cached.status
         }
         lock.unlock()
 
-        let branch = runner.run(gitPath, ["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var status = Status.unknown
-        if !branch.isEmpty, branch != "HEAD", !branch.hasPrefix("fatal") {
-            // -uno: ignore untracked files. node_modules and build output would
-            // otherwise mark almost every project dirty forever.
-            let porcelain = runner.run(gitPath, ["-C", path, "status", "--porcelain", "-uno"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            status = Status(branch: branch, dirty: !porcelain.isEmpty)
-        }
+        // One fork for both answers. -uno: ignore untracked files, or node_modules and
+        // build output would mark almost every project dirty forever.
+        let output = runner.run(gitPath, ["-C", path, "status", "--porcelain=v2", "--branch", "-uno"])
+        let status = Self.parse(output)
 
         lock.lock()
         cache[path] = (status, now)
         lock.unlock()
         return status
+    }
+
+    /// `git status --porcelain=v2 --branch`: header lines start with "#", every other
+    /// line is a changed tracked file.
+    static func parse(_ output: String) -> Status {
+        var branch: String?
+        var dirty = false
+        for line in output.split(separator: "\n") {
+            if line.hasPrefix("# branch.head ") {
+                let head = String(line.dropFirst("# branch.head ".count))
+                branch = head == "(detached)" ? nil : head
+            } else if !line.hasPrefix("#") {
+                dirty = true
+            }
+        }
+        guard branch != nil else { return .unknown }
+        return Status(branch: branch, dirty: dirty)
     }
 }

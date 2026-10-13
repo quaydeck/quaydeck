@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import QuaydeckCore
@@ -7,8 +8,6 @@ import QuaydeckCore
 public final class AppModel: ObservableObject {
 
     @Published public private(set) var snapshot = Snapshot()
-    @Published public private(set) var scanning = false
-    @Published public private(set) var lastScan: Date?
     @Published public var searchText = ""
     @Published public var dismissedAdvice: Set<String> = []
 
@@ -23,13 +22,25 @@ public final class AppModel: ObservableObject {
     private let containers: ContainerControlling
     private var inventory: PortInventory
 
-    /// Poll quickly while the menu is open and slowly when it is not. Scanning forks
-    /// several processes, so doing it every three seconds in the background would be
-    /// rude on a laptop battery.
+    /// Poll quickly while the menu is open and slowly when it is not. A scan reads the
+    /// kernel directly and costs about 15 ms of CPU, but a closed menu is most of the
+    /// day, and Low Power Mode asks every app to back off further.
     private let openInterval: TimeInterval = 3
-    private let idleInterval: TimeInterval = 20
+    private var idleInterval: TimeInterval {
+        ProcessInfo.processInfo.isLowPowerModeEnabled ? 60 : 20
+    }
     private var timer: Timer?
     private var menuIsOpen = false
+    /// Not published: a scan takes milliseconds, and flipping a published flag twice
+    /// per scan redrew the menu for nothing.
+    private var scanning = false
+    /// Screens asleep or another user active: nobody can look, so nothing is scanned.
+    private var paused = false
+    /// The newest scan. Published straight away while the menu is open; while it is
+    /// closed only when something the menu bar or a notification cares about changed.
+    private var latest = Snapshot()
+    /// When each port last had its page fetched.
+    private var probedAt: [Int: Date] = [:]
 
     /// Health results survive between scans so a row does not flicker back to
     /// "no response" while the next probe is in flight.
@@ -73,8 +84,47 @@ public final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         if preferences.notificationsEnabled { Notifier.requestAuthorisation() }
+        observeSystem()
         refresh()
         scheduleTimer()
+    }
+
+    /// Stops scanning while the screens sleep or the session is switched away, scans
+    /// once on return, and picks up Low Power Mode as it changes.
+    private func observeSystem() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        let pause: [Notification.Name] = [NSWorkspace.screensDidSleepNotification,
+                                          NSWorkspace.willSleepNotification,
+                                          NSWorkspace.sessionDidResignActiveNotification]
+        let resume: [Notification.Name] = [NSWorkspace.screensDidWakeNotification,
+                                           NSWorkspace.didWakeNotification,
+                                           NSWorkspace.sessionDidBecomeActiveNotification]
+        for name in pause {
+            workspace.publisher(for: name)
+                .sink { [weak self] _ in self?.setPaused(true) }
+                .store(in: &cancellables)
+        }
+        for name in resume {
+            workspace.publisher(for: name)
+                .sink { [weak self] _ in self?.setPaused(false) }
+                .store(in: &cancellables)
+        }
+        NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.scheduleTimer() }
+            .store(in: &cancellables)
+    }
+
+    private func setPaused(_ value: Bool) {
+        guard paused != value else { return }
+        paused = value
+        if value {
+            timer?.invalidate()
+            timer = nil
+        } else {
+            scheduleTimer()
+            refresh()
+        }
     }
 
     // MARK: - Derived views
@@ -118,27 +168,40 @@ public final class AppModel: ObservableObject {
     public func setMenuOpen(_ open: Bool) {
         guard menuIsOpen != open else { return }
         menuIsOpen = open
+        if open, latest != snapshot { snapshot = latest }
         scheduleTimer()
         if open { refresh() }
     }
 
     private func scheduleTimer() {
         timer?.invalidate()
+        guard !paused else { return }
         let interval = menuIsOpen ? openInterval : idleInterval
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        // Lets macOS fold this wake-up in with others instead of waking just for us.
+        timer.tolerance = interval * 0.25
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     public func refresh() {
-        guard !scanning else { return }
+        guard !scanning, !paused else { return }
         scanning = true
 
         let inventory = self.inventory
+        let interactive = menuIsOpen
         Task.detached(priority: .utility) {
-            let fresh = inventory.snapshot()
+            let fresh = inventory.snapshot(interactive: interactive)
             await MainActor.run { self.apply(fresh) }
         }
+    }
+
+    /// What the menu bar icon and notifications depend on. While the menu is closed,
+    /// a scan that leaves this unchanged is kept, not published.
+    private func outline(_ snapshot: Snapshot) -> [String] {
+        snapshot.servers.map { "\($0.port):\($0.kind):\($0.agent?.rawValue ?? "")" }.sorted()
     }
 
     private func apply(_ fresh: Snapshot) {
@@ -156,26 +219,42 @@ public final class AppModel: ObservableObject {
         notifyAboutChanges(in: merged)
         preferences.rememberRunning(merged.servers)
 
-        snapshot = merged
+        latest = merged
+        if menuIsOpen || outline(merged) != outline(snapshot) {
+            snapshot = merged
+        }
         scanning = false
-        lastScan = Date()
 
         // Forget cached health for ports that are gone, so a port reused by a
         // different server does not inherit the old one's title.
         let livePorts = Set(merged.servers.map(\.port))
         healthCache = healthCache.filter { livePorts.contains($0.key) }
+        probedAt = probedAt.filter { livePorts.contains($0.key) }
 
         probeHealth(of: merged.servers.filter(\.probeable))
     }
 
+    /// Fetches pages only as often as someone could notice: every few seconds while
+    /// the menu is open, and while it is closed only for ports never seen before, so
+    /// the title is already there when the menu opens.
     private func probeHealth(of servers: [LocalServer]) {
+        let now = Date()
         for server in servers {
             let port = server.port
+            if let last = probedAt[port], !menuIsOpen || now.timeIntervalSince(last) < 6 { continue }
+            probedAt[port] = now
             Task { [weak self] in
                 guard let self else { return }
                 let result = await self.probe.probe(port: port)
                 await MainActor.run {
+                    let previous = self.healthCache[port]
                     self.healthCache[port] = result
+                    guard previous != result else { return }
+                    for index in self.latest.servers.indices where self.latest.servers[index].port == port {
+                        self.latest.servers[index].title = result.title ?? self.latest.servers[index].title
+                        self.latest.servers[index].respondsHTTP = result.respondsHTTP
+                        self.latest.servers[index].httpStatus = result.status
+                    }
                     guard let index = self.snapshot.servers.firstIndex(where: { $0.port == port })
                     else { return }
                     self.snapshot.servers[index].title = result.title ?? self.snapshot.servers[index].title
@@ -268,6 +347,12 @@ public final class AppModel: ObservableObject {
     }
 
     public func open(_ group: ContainerGroup) { actions.open(group.primary) }
+
+    /// "localhost:55003", for ports a browser cannot use.
+    public func copyAddress(_ server: LocalServer) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("localhost:\(server.port)", forType: .string)
+    }
 
     public func reveal(_ group: ContainerGroup) {
         guard let path = group.projectPath else { return }

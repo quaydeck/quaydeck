@@ -15,18 +15,28 @@ public struct Listener: Hashable, Sendable {
 /// format breaks on any binary path containing a space, and macOS is full of those
 /// ("/Applications/Google Drive.app/...").
 public struct ListenerSource: Sendable {
-    private let runner: CommandRunner
+    private let runner: CommandRunner?
+    private let kernel: KernelSource?
 
     /// `lsof` lives in /usr/sbin on macOS, but is on PATH in some environments.
     private static let candidatePaths = ["/usr/sbin/lsof", "/usr/bin/lsof", "/opt/homebrew/bin/lsof"]
 
+    /// Reads recorded or real `lsof` output. The path fixtures take.
     public init(runner: CommandRunner) {
         self.runner = runner
+        self.kernel = nil
+    }
+
+    /// Asks the kernel directly. The path the app takes.
+    public init(kernel: KernelSource) {
+        self.runner = nil
+        self.kernel = kernel
     }
 
     /// Every listening TCP socket on the machine. IPv4 and IPv6 rows for the same
     /// server both appear; `PortInventory` collapses them.
     public func listeners() -> [Listener] {
+        if let kernel { return kernel.listeners() }
         let output = firstNonEmpty(arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-FpcPn"])
         return Self.parseListeners(output)
     }
@@ -34,12 +44,18 @@ public struct ListenerSource: Sendable {
     /// Working directory per pid. This is what tells us which project a server belongs to.
     public func workingDirectories(for pids: Set<Int32>) -> [Int32: String] {
         guard !pids.isEmpty else { return [:] }
+        if let kernel {
+            var map: [Int32: String] = [:]
+            for pid in pids { map[pid] = kernel.workingDirectory(of: pid) }
+            return map
+        }
         let list = pids.map(String.init).sorted().joined(separator: ",")
         let output = firstNonEmpty(arguments: ["-a", "-d", "cwd", "-p", list, "-Fpn"])
         return Self.parseWorkingDirectories(output)
     }
 
     private func firstNonEmpty(arguments: [String]) -> String {
+        guard let runner else { return "" }
         for path in Self.candidatePaths {
             let output = runner.run(path, arguments)
             if !output.isEmpty { return output }

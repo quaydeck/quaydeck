@@ -27,10 +27,11 @@ statistics, and no server that belongs to Quaydeck holding anything about you.
 
 All of this stays on your Mac.
 
-- **Listening TCP sockets**, via `lsof`: port numbers, the process holding each one,
-  and whether it is bound to loopback or to every interface.
-- **Process details**, via `ps`: process id, parent process id, command line, elapsed
-  time, CPU and memory. The parent chain is walked to see whether a coding agent
+- **Listening TCP sockets**, read from the kernel (what `lsof` shows): port numbers,
+  the process holding each one, and whether it is bound to loopback or to every
+  interface.
+- **Process details**, read from the kernel (what `ps` shows): process id, parent
+  process id, command line, working directory, elapsed time, CPU and memory. The parent chain is walked to see whether a coding agent
   started a server.
 - **Ten named environment variables** of a listening process, and no others:
   `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,

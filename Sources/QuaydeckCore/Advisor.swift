@@ -100,7 +100,9 @@ public struct Advisor: Sendable {
             return Advice(
                 id: "unrecognised:\(server.port)",
                 kind: .unrecognised,
-                severity: .critical,
+                // Reachable from the network is the alarming case. Bound to this Mac
+                // only, it is worth a look rather than a red banner.
+                severity: server.exposed ? .critical : .warning,
                 icon: "exclamationmark.shield.fill",
                 text: "\(server.command) is listening on :\(server.port) from an untrusted path\(network).\(origin)",
                 actionLabel: "Quit",

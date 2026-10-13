@@ -52,6 +52,12 @@ runs in under a second, needs no dev servers running, and never signals a real p
 If you add something that needs to shell out, add a method to the runner rather than
 reaching around it.
 
+The one exception is `KernelSource`, which reads sockets and processes through libproc
+and sysctl so the app never has to start `lsof` or `ps`. It is the production twin of
+the `lsof`/`ps` path the fixtures use. If you change it, run
+`QUAYDECK_LIVE=1 swift test --filter LiveMachineTests`, which checks it against real
+`lsof` and `ps` output on your machine.
+
 ## Tests
 
 Every parser, the project resolver, the classifier and the advisor are covered by tests

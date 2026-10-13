@@ -20,16 +20,32 @@ public struct ProcInfo: Hashable, Sendable {
 
 /// Reads process tables out of `ps`.
 public struct ProcessSource: Sendable {
-    private let runner: CommandRunner
+    private let runner: CommandRunner?
+    private let kernel: KernelSource?
     private static let psPath = "/bin/ps"
 
+    /// Reads recorded or real `ps` output. The path fixtures take.
     public init(runner: CommandRunner) {
         self.runner = runner
+        self.kernel = nil
+    }
+
+    /// Asks the kernel directly. The path the app takes.
+    public init(kernel: KernelSource) {
+        self.runner = nil
+        self.kernel = kernel
     }
 
     /// Details for a specific set of pids.
     public func info(for pids: Set<Int32>) -> [Int32: ProcInfo] {
         guard !pids.isEmpty else { return [:] }
+        if let kernel {
+            let now = Date()
+            var map: [Int32: ProcInfo] = [:]
+            for pid in pids { map[pid] = kernel.process(pid, now: now) }
+            return map
+        }
+        guard let runner else { return [:] }
         let list = pids.map(String.init).sorted().joined(separator: ",")
         // -ww disables the column-width truncation that mangles long executable paths.
         let output = runner.run(Self.psPath, ["-ww", "-o", "pid=,ppid=,etime=,pcpu=,rss=,args=", "-p", list])
@@ -37,8 +53,12 @@ public struct ProcessSource: Sendable {
     }
 
     /// Every process on the machine, with accumulated CPU time. Used to spot runaway
-    /// builds that hold no port.
-    public func allProcesses() -> [ProcInfo] {
+    /// builds that hold no port. `named` lets the kernel path skip reading the
+    /// arguments of the hundreds of processes that cannot matter; `ps` returns
+    /// everything regardless.
+    public func allProcesses(named: (String) -> Bool = { _ in true }) -> [ProcInfo] {
+        if let kernel { return kernel.processes(named: named) }
+        guard let runner else { return [] }
         let output = runner.run(Self.psPath, ["-Ao", "pid=,rss=,time=,args="])
         return Self.parseAll(output)
     }
@@ -46,6 +66,8 @@ public struct ProcessSource: Sendable {
     /// Look up a single pid. Used when walking a parent chain past the processes we
     /// already asked about.
     public func one(_ pid: Int32) -> ProcInfo? {
+        if let kernel { return kernel.process(pid) }
+        guard let runner else { return nil }
         let output = runner.run(Self.psPath, ["-ww", "-o", "pid=,ppid=,etime=,pcpu=,rss=,args=", "-p", "\(pid)"])
         return Self.parseDetailed(output)[pid]
     }

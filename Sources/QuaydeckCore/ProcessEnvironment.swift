@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// Reads a small, fixed set of environment variables from another process.
@@ -29,68 +28,23 @@ public struct ProcessEnvironment: EnvironmentProbing {
         "AI_AGENT",
     ]
 
-    public init() {}
+    private let reader: ProcArgsReader
+
+    public init() {
+        self.reader = ProcArgsReader()
+    }
+
+    init(reader: ProcArgsReader) {
+        self.reader = reader
+    }
 
     public func markers(of pid: Int32) -> [String: String] {
-        guard pid > 1, let buffer = Self.procargs(of: pid) else { return [:] }
-        return Self.parse(procargs: buffer, wanted: Self.wanted)
+        guard pid > 1 else { return [:] }
+        return reader.withProcArgs(of: pid) { ProcArgs.environment(in: $0, wanted: Self.wanted) } ?? [:]
     }
 
-    /// The kernel's limit on argument plus environment size. Fixed for the life of
-    /// the system, so asked once.
-    private static let argmax: Int = {
-        var mib: [Int32] = [CTL_KERN, KERN_ARGMAX]
-        var value: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        guard sysctl(&mib, 2, &value, &size, nil, 0) == 0, value > 0 else { return 0 }
-        return Int(value)
-    }()
-
-    /// The raw KERN_PROCARGS2 block. macOS only hands it out for processes owned by the
-    /// same user, which is every dev server worth looking at.
-    static func procargs(of pid: Int32) -> [UInt8]? {
-        let argmax = Self.argmax
-        guard argmax > 0 else { return nil }
-        var buffer = [UInt8](repeating: 0, count: argmax)
-        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
-        var size = argmax
-        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size
-        else { return nil }
-        return Array(buffer.prefix(size))
-    }
-
-    /// Layout: argc as a 32-bit int, the executable path, NUL padding, argc argument
-    /// strings, then the environment as NUL-terminated `KEY=value` strings ending at an
-    /// empty one.
     static func parse(procargs bytes: [UInt8], wanted: Set<String>) -> [String: String] {
-        guard bytes.count > 4 else { return [:] }
-        let argc = Int(bytes[0]) | Int(bytes[1]) << 8 | Int(bytes[2]) << 16 | Int(bytes[3]) << 24
-        var index = 4
-
-        // Executable path, then the padding after it.
-        while index < bytes.count, bytes[index] != 0 { index += 1 }
-        while index < bytes.count, bytes[index] == 0 { index += 1 }
-
-        var skipped = 0
-        while index < bytes.count, skipped < argc {
-            while index < bytes.count, bytes[index] != 0 { index += 1 }
-            index += 1
-            skipped += 1
-        }
-
-        var result: [String: String] = [:]
-        while index < bytes.count {
-            let start = index
-            while index < bytes.count, bytes[index] != 0 { index += 1 }
-            if index == start { break }
-            if let equals = bytes[start..<index].firstIndex(of: UInt8(ascii: "=")),
-               let key = String(bytes: bytes[start..<equals], encoding: .utf8),
-               wanted.contains(key) {
-                result[key] = String(bytes: bytes[(equals + 1)..<index], encoding: .utf8) ?? ""
-            }
-            index += 1
-        }
-        return result
+        ProcArgs.environment(in: bytes[...], wanted: wanted)
     }
 }
 

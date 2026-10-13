@@ -47,7 +47,7 @@ public final class BusyProcessDetector: @unchecked Sendable {
     }
 
     public func detect(excluding listenerPIDs: Set<Int32>, now: Date = Date()) -> [BusyProcess] {
-        let all = processes.allProcesses()
+        let all = processes.allProcesses { Self.runtimeNames.contains($0.lowercased()) }
         var result: [BusyProcess] = []
         var fresh: [Int32: (Double, Date, Int)] = [:]
 
