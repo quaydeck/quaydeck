@@ -42,6 +42,9 @@ All of this stays on your Mac.
 - **Agent session titles**, for servers an agent started: the chat name from Codex's
   `session_index.jsonl`, or the session title from the end of that session's Claude
   Code transcript. Only the title is read out of either file, and it stays in memory.
+- **Code signatures** of listeners running from outside the usual install
+  locations, checked by macOS on this Mac with network access switched off, so
+  there is no revocation lookup. Only the signing organisation's name is kept.
 - **Running containers**, via `docker ps`, but only when Docker (or OrbStack, Colima,
   Rancher) is holding a port: container name, image, status, published ports and
   their compose project and folder. This talks to the Docker daemon over its local

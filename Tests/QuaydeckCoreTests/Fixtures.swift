@@ -67,6 +67,8 @@ enum DevMachine {
         PortInventory(
             runner: runner(listeners: listeners, processes: processes, cwds: cwds, psAll: psAll),
             fileSystem: fileSystem,
+            environment: StubEnvironment(),
+            signatures: StubSignatures(),
             home: home
         )
     }

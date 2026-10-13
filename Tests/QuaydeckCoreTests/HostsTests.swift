@@ -183,6 +183,9 @@ final class HostsTests: XCTestCase {
         p600
         cagent-browser
         n127.0.0.1:60741
+        p700
+        cfigma_agent
+        n127.0.0.1:44950
         """
         let processes = """
           100     1    01:00  0.0 102400 /usr/local/bin/node /Users/dev/code/shop/node_modules/.bin/astro dev
@@ -193,6 +196,7 @@ final class HostsTests: XCTestCase {
           420     1    02:00  1.0 300000 claude --dangerously-skip-permissions
           500     1    00:30  0.0  51200 /usr/local/bin/node /Users/dev/.npm/_npx/1a2b/node_modules/.bin/browser-mcp --port 6006
           600     1    00:10  0.0  30720 /Users/dev/.local/lib/node_modules/agent-browser/bin/agent-browser-darwin-arm64
+          700     1 2-00:00:00 0.0 40960 /Users/dev/Library/Application Support/Figma/FigmaAgent.app/Contents/MacOS/figma_agent --from-desktop-app
         """
         let cwds = """
         p100
@@ -207,6 +211,8 @@ final class HostsTests: XCTestCase {
         n/Users/dev/Documents/Codex/2026-10-08/ik-x20
         p600
         n/private/tmp/claude-501/x/scratchpad
+        p700
+        n/
         """
         let docker = [
             "abc123\tddev-shop-web\tddev/ddev-webserver:v1\tUp 3 minutes (healthy)\t"
@@ -241,6 +247,7 @@ final class HostsTests: XCTestCase {
                 500: ["CODEX_THREAD_ID": "t-1"],
                 600: ["CLAUDECODE": "1"],
             ]),
+            signatures: StubSignatures([700: "Figma, Inc."]),
             home: DevMachine.home
         )
         return inventory.snapshot(includeBusyProcesses: false)
@@ -270,7 +277,7 @@ final class HostsTests: XCTestCase {
     func testAnAgentsOwnToolingStaysOutOfTheServerList() throws {
         let snapshot = machine()
         XCTAssertFalse(try server(6006, in: snapshot).isDevServer)
-        XCTAssertEqual(snapshot.otherServers.map(\.port), [60741, 6006])
+        XCTAssertEqual(snapshot.otherServers.map(\.port), [60741, 6006, 44950])
     }
 
     /// Markers explain an alert but never silence one: anything can set them.
@@ -312,6 +319,53 @@ final class HostsTests: XCTestCase {
         XCTAssertTrue(Advisor().build(from: machine()).allSatisfy { $0.kind != .memoryHog })
     }
 
+    // MARK: - Signatures
+
+    /// Figma's font helper runs from the home folder all day. Its Developer ID
+    /// signature, not its location, decides that it is fine.
+    func testASignedHelperInAnOddPlaceIsNotAnAlert() throws {
+        let snapshot = machine()
+        let figma = try server(44950, in: snapshot)
+        XCTAssertEqual(figma.kind, .system)
+        XCTAssertEqual(figma.systemLabel, "Figma font helper")
+        XCTAssertFalse(Advisor().build(from: snapshot).contains { $0.port == 44950 })
+        XCTAssertEqual(try server(60741, in: snapshot).kind, .unrecognised, "ad-hoc signed tools still alert")
+    }
+
+    func testReadsTheOrganisationFromASigningCertificate() {
+        XCTAssertEqual(CodeSignatureChecker.organisation(fromSubject: "Developer ID Application: Figma, Inc. (T8RA8NE3B7)"),
+                       "Figma, Inc.")
+        XCTAssertEqual(CodeSignatureChecker.organisation(fromSubject: "Software Signing"), "Apple")
+    }
+
+    /// Runs /bin/sleep as it ships (Apple-signed) and as an ad-hoc re-signed copy.
+    func testChecksTheSignatureOfARunningProcess() throws {
+        let checker = CodeSignatureChecker()
+
+        let apple = try running("/bin/sleep")
+        defer { apple.terminate() }
+        XCTAssertEqual(checker.trustedSigner(of: apple.processIdentifier), "Apple")
+
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quaydeck-adhoc-\(UUID().uuidString)").path
+        try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: copy)
+        defer { try? FileManager.default.removeItem(atPath: copy) }
+        _ = ShellRunner().run("/usr/bin/codesign", ["--force", "--sign", "-", copy])
+        let adhoc = try running(copy)
+        defer { adhoc.terminate() }
+        XCTAssertNil(checker.trustedSigner(of: adhoc.processIdentifier))
+
+        XCTAssertNil(checker.trustedSigner(of: 1), "launchd is never examined")
+    }
+
+    private func running(_ path: String) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["30"]
+        try process.run()
+        return process
+    }
+
     func testWarnsAboutAContainerOnEveryInterface() {
         let advice = Advisor().build(from: machine())
         XCTAssertTrue(advice.contains { $0.kind == .exposed && $0.port == 5432 })
@@ -324,7 +378,8 @@ final class HostsTests: XCTestCase {
         ])
         let inventory = PortInventory(runner: runner,
                                       fileSystem: StubFileSystem(files: ["/usr/local/bin/docker": ""]),
-                                      environment: StubEnvironment(), home: DevMachine.home)
+                                      environment: StubEnvironment(), signatures: StubSignatures(),
+                                      home: DevMachine.home)
         _ = inventory.snapshot(includeBusyProcesses: false)
         XCTAssertFalse(runner.calls.contains { $0.executable.hasSuffix("docker") })
     }

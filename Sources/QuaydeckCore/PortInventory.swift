@@ -17,13 +17,16 @@ public final class PortInventory: @unchecked Sendable {
     private let agents = AgentDetector()
     private let sessionTitles: SessionTitles
     private let docker: DockerSource
+    private let signatures: SignatureChecking
 
     public init(runner: CommandRunner = ShellRunner(),
                 fileSystem: FileSystemProbe = RealFileSystem(),
                 environment: EnvironmentProbing = ProcessEnvironment(),
+                signatures: SignatureChecking = CodeSignatureChecker(),
                 home: String = NSHomeDirectory(),
                 userRoots: [String] = []) {
         self.environment = environment
+        self.signatures = signatures
         self.sessionTitles = SessionTitles(fileSystem: fileSystem, home: home)
         self.docker = DockerSource(runner: runner, fileSystem: fileSystem, home: home)
         self.listenerSource = ListenerSource(runner: runner)
@@ -111,6 +114,14 @@ public final class PortInventory: @unchecked Sendable {
         var (kind, label) = classifier.classify(command: server.command,
                                                 args: server.args,
                                                 hasProject: project != nil)
+
+        // An odd install location is outweighed by a signature Apple issued: Figma's
+        // font helper lives in ~/Library/Application Support and is signed by Figma.
+        // Only asked for listeners that would otherwise be flagged.
+        if kind == .unrecognised, let signer = signatures.trustedSigner(of: server.pid) {
+            kind = .system
+            label = label ?? "\(server.command) (\(signer))"
+        }
 
         // Who started it. Asked for dev servers; for project-less runtimes, which are
         // exactly the previews agents leave in chat folders; and for unrecognised

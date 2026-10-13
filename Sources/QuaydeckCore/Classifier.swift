@@ -84,6 +84,7 @@ public struct Classifier: Sendable {
         ("spotify", "Spotify"),
         ("raycast", "Raycast"),
         ("ollama", "Ollama (local model)"),
+        ("figma_agent", "Figma font helper"),
         ("chrome", "Chrome (remote debugging)"),
         ("firefox", "Firefox"),
         ("logioptio", "Logi Options+"),

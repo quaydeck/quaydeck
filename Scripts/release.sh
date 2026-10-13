@@ -65,8 +65,22 @@ command -v create-dmg >/dev/null 2>&1 && HAVE_CREATE_DMG=true || HAVE_CREATE_DMG
 
 # ---------------------------------------------------------------- build
 
+[ -n "${QUAYDECK_FEED_URL:-}" ] && [ -n "${QUAYDECK_PUBLIC_KEY:-}" ] || die "missing Sparkle settings.
+
+Without QUAYDECK_FEED_URL and QUAYDECK_PUBLIC_KEY the build ships with no updater,
+and everyone who installs it is cut off from every later release. Set both in
+Scripts/.release-env. The public key must be the one earlier releases carry:
+  /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' /Applications/Quaydeck.app/Contents/Info.plist"
+
 say "Building release $VERSION"
 "$ROOT/Scripts/build-app.sh" --release
+
+# Sparkle compares sparkle:version with the installed CFBundleVersion, not with the
+# marketing version. 1.0.0 shipped as build "100", and Sparkle reads "1.1.0" as older
+# than "100", so the feed must carry the build number the app itself carries.
+BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+EMBEDDED_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist")"
+[ "$EMBEDDED_KEY" = "$QUAYDECK_PUBLIC_KEY" ] || die "the built app carries the wrong Sparkle key"
 
 # ---------------------------------------------------------------- dmg
 
@@ -131,9 +145,9 @@ cat > "$DIST/appcast-entry.xml" <<XML
   <title>$VERSION</title>
   <pubDate>$PUBLISHED</pubDate>
   <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-  <sparkle:releaseNotesLink>https://quaydeck.app/changelog#$VERSION</sparkle:releaseNotesLink>
+  <sparkle:releaseNotesLink>https://github.com/quaydeck/quaydeck/releases/tag/v$VERSION</sparkle:releaseNotesLink>
   <enclosure url="$QUAYDECK_DOWNLOAD_BASE/v$VERSION/$NAME-$VERSION.dmg"
-             sparkle:version="$VERSION"
+             sparkle:version="$BUILD_NUMBER"
              sparkle:shortVersionString="$VERSION"
              length="$SIZE"
              type="application/octet-stream"

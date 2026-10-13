@@ -117,6 +117,8 @@ final class PortInventoryTests: XCTestCase {
                 cwds: try Fixture.text("lsof-cwd.txt")
             ),
             fileSystem: StubFileSystem(),
+            environment: StubEnvironment(),
+            signatures: StubSignatures(),
             home: DevMachine.home
         )
         let result = inventory.snapshot(includeBusyProcesses: false)
@@ -136,6 +138,8 @@ final class PortInventoryTests: XCTestCase {
                 cwds: try Fixture.text("lsof-cwd.txt")
             ),
             fileSystem: StubFileSystem(),
+            environment: StubEnvironment(),
+            signatures: StubSignatures(),
             home: DevMachine.home
         )
         let labels = Set(inventory.snapshot(includeBusyProcesses: false).servers.compactMap(\.systemLabel))

@@ -13,5 +13,5 @@ ASC_ISSUER_ID=
 
 # Sparkle. Generate once with the generate_keys tool in .build/artifacts/, then put
 # the printed public key here. Without both of these the app ships without an updater.
-# QUAYDECK_FEED_URL=https://quaydeck.app/appcast.xml
+# QUAYDECK_FEED_URL=https://quaydeck.vercel.app/appcast.xml
 # QUAYDECK_PUBLIC_KEY=

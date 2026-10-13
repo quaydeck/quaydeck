@@ -24,7 +24,9 @@ one.
 - **Finds what you forgot.** Two copies of the same project on different ports, a
   server idle for three days, a `tsc --watch` pegging a core with no server attached.
 - **Flags what you did not start.** Anything listening from a path that is not a normal
-  install location, especially if it is reachable from your network.
+  install location and is not signed with an Apple-issued Developer ID, especially if
+  it is reachable from your network. A signed helper in an odd place, like Figma's
+  font helper in `~/Library/Application Support`, is not an alarm.
 - **Restarts from memory.** Projects you have run before stay in a list even after they
   stop, one click to bring them back in a terminal.
 - **Knows who started what.** Servers you started, servers Claude Code started and
