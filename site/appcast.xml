@@ -6,6 +6,18 @@
     <description>Quaydeck release feed</description>
     <language>en</language>
     <item>
+      <title>1.1.0</title>
+      <pubDate>Tue, 13 Oct 2026 20:57:40 +0000</pubDate>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://github.com/quaydeck/quaydeck/releases/tag/v1.1.0</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/quaydeck/quaydeck/releases/download/v1.1.0/Quaydeck-1.1.0.dmg"
+                 sparkle:version="110"
+                 sparkle:shortVersionString="1.1.0"
+                 length="2952900"
+                 type="application/octet-stream"
+                 sparkle:edSignature="WXRcJxjMF0G+Ondx7pRwGD8ZlsTfL1WavctqJrFyh0Ur8XeXG1lgfYDOagtygVoblA5ivrfZFrTkvLw5zzUJAw==" />
+    </item>
+    <item>
       <title>1.0.0</title>
       <pubDate>Tue, 28 Jul 2026 21:38:17 +0000</pubDate>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
