@@ -96,10 +96,42 @@ final class ClassifierTests: XCTestCase {
         XCTAssertTrue(classifier.isTrusted(args: "", command: "somedaemon"))
     }
 
-    // MARK: - Agents
+    // MARK: - Project-less servers
 
-    func testFindsTheAgentThatStartedAServer() {
-        XCTAssertEqual(classifier.agentName(inAncestry: ["node vite", "claude --resume", "zsh"]), "claude")
-        XCTAssertNil(classifier.agentName(inAncestry: ["node vite", "zsh", "login"]))
+    /// An agent's preview of a chat folder has no manifest to find. It used to be filed
+    /// as macOS noise and only appeared under "Show all ports".
+    func testAnAgentPreviewWithoutAProjectIsAServer() {
+        XCTAssertTrue(classifier.isProjectlessServer(
+            command: "Python", args: "/opt/homebrew/bin/python3 -m http.server 4173",
+            cwd: "/Users/dev/Documents/Codex/2026-10-08/ik-x20", startedByAgent: true))
+        XCTAssertTrue(classifier.isProjectlessServer(
+            command: "node", args: "/usr/local/bin/node server.js",
+            cwd: "/private/tmp/claude-501/x/scratchpad", startedByAgent: true))
+    }
+
+    func testAPlainStaticServerVouchesForItself() {
+        XCTAssertTrue(classifier.isProjectlessServer(
+            command: "Python", args: "/usr/bin/python3 -m http.server 8000",
+            cwd: "/Users/dev/Downloads/mockup", startedByAgent: false))
+        XCTAssertFalse(classifier.isProjectlessServer(
+            command: "node", args: "/usr/local/bin/node server.js",
+            cwd: "/Users/dev/Downloads/mockup", startedByAgent: false),
+            "an unattributed runtime in a folder could be any app's helper")
+    }
+
+    func testAgentToolingIsNotAServer() {
+        XCTAssertFalse(classifier.isProjectlessServer(
+            command: "node", args: "/usr/local/bin/node /Users/dev/.npm/_npx/1a2b/node_modules/.bin/browser-mcp --port 6006",
+            cwd: "/Users/dev/Documents/Codex/2026-10-08/ik-x20", startedByAgent: true))
+        XCTAssertFalse(classifier.isProjectlessServer(
+            command: "node", args: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node repl.js",
+            cwd: "/Users/dev/Documents/Codex/2026-10-08/ik-x20", startedByAgent: true))
+    }
+
+    func testARuntimeInTheHomeFolderOrRootIsNotAServer() {
+        XCTAssertFalse(classifier.isProjectlessServer(
+            command: "node", args: "playwriter-ws-server", cwd: "/Users/dev", startedByAgent: true))
+        XCTAssertFalse(classifier.isProjectlessServer(
+            command: "node", args: "Raycast Backend", cwd: "/", startedByAgent: true))
     }
 }

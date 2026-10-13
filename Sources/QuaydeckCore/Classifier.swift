@@ -97,16 +97,6 @@ public struct Classifier: Sendable {
         ("caddy", "Caddy"),
     ]
 
-    /// Coding agents and editors worth crediting on a row, so you can tell which
-    /// servers you started by hand and which something else started for you.
-    static let agentSignatures: [(needle: String, label: String)] = [
-        ("claude", "claude"),
-        ("cursor", "cursor"),
-        ("codex", "codex"),
-        ("copilot", "copilot"),
-        ("aider", "aider"),
-    ]
-
     private let home: String
 
     public init(home: String = NSHomeDirectory()) {
@@ -168,14 +158,32 @@ public struct Classifier: Sendable {
         return Self.homeTrustedPrefixes.contains { relative.hasPrefix($0) }
     }
 
-    /// Which coding agent, if any, appears in a process's ancestry.
-    public func agentName(inAncestry args: [String]) -> String? {
-        for text in args {
-            let lowered = text.lowercased()
-            if let match = Self.agentSignatures.first(where: { lowered.contains($0.needle) }) {
-                return match.label
-            }
-        }
-        return nil
+    /// Tooling an agent runs for itself rather than for you: MCP servers fetched by
+    /// `npx`, helpers inside the agents' own data directories.
+    static let agentToolingMarkers = ["/.npm/_npx/", "/.codex/", "/.claude/", "/.cache/", "/node_modules/.bin/mcp"]
+
+    /// A runtime serving files from a folder with no project manifest: Codex and Claude
+    /// previews (`python3 -m http.server` in a chat's outputs folder), or a quick static
+    /// server of your own. Classified as `.system` until something vouches for it.
+    ///
+    /// `startedByAgent` is that something for agent previews; a plain `http.server`
+    /// vouches for itself. Without either, a runtime in a folder could just as well be
+    /// an app's helper, which is why this is not the default.
+    public func isProjectlessServer(command: String, args: String, cwd: String,
+                                    startedByAgent: Bool) -> Bool {
+        let loweredCommand = command.lowercased()
+        let loweredArgs = args.lowercased()
+        guard Self.interpreters.contains(loweredCommand)
+                || loweredArgs.contains("npx ") || loweredArgs.contains("bunx ") else { return false }
+        if args.contains("/Applications/") || args.contains("/System/Library/") { return false }
+        if Self.agentToolingMarkers.contains(where: args.contains) { return false }
+        guard cwd != "/", cwd != home, !cwd.isEmpty else { return false }
+        return startedByAgent || loweredArgs.contains("http.server") || loweredArgs.contains("simplehttpserver")
+    }
+
+    /// Whether a runtime is worth checking for agent markers at all. Keeps the parent
+    /// walk, which forks `ps`, off the many listeners that can never be dev servers.
+    public func mightBeProjectlessServer(command: String, args: String, cwd: String) -> Bool {
+        isProjectlessServer(command: command, args: args, cwd: cwd, startedByAgent: true)
     }
 }

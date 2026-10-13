@@ -27,8 +27,16 @@ one.
   install location, especially if it is reachable from your network.
 - **Restarts from memory.** Projects you have run before stay in a list even after they
   stop, one click to bring them back in a terminal.
+- **Knows who started what.** Servers you started, servers Claude Code started and
+  servers Codex started each get their own section, with the chat or session that
+  started them. That includes the quick previews agents leave behind in folders with
+  no project, and servers whose chat has long since closed.
+- **Shows Docker as containers, not as `com.docker.backend`.** One row per container,
+  named after its compose project, with its published ports and health. Stopping one
+  stops that container, never Docker itself.
 
-Everything it knows, it read from your own machine with `lsof` and `ps`.
+Everything it knows, it read from your own machine with `lsof`, `ps` and, when
+Docker is running, `docker ps`.
 
 ## Install
 

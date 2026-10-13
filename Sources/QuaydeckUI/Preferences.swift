@@ -23,6 +23,7 @@ public final class Preferences: ObservableObject {
         static let roots = "projectRoots"
         static let completedFirstRun = "completedFirstRun"
         static let checkForUpdates = "checkForUpdates"
+        static let collapsedSections = "collapsedSections"
     }
 
     private let defaults: UserDefaults
@@ -59,6 +60,11 @@ public final class Preferences: ObservableObject {
         didSet { defaults.set(checkForUpdates, forKey: Key.checkForUpdates) }
     }
 
+    /// Menu sections folded shut: "you", "claude", "codex", "docker" and so on.
+    @Published public var collapsedSections: Set<String> {
+        didSet { defaults.set(Array(collapsedSections), forKey: Key.collapsedSections) }
+    }
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.pinnedProjects = Set(defaults.stringArray(forKey: Key.pinned) ?? [])
@@ -67,6 +73,7 @@ public final class Preferences: ObservableObject {
         self.completedFirstRun = defaults.bool(forKey: Key.completedFirstRun)
         // Default on, but only once the user has been through the welcome screen.
         self.checkForUpdates = defaults.object(forKey: Key.checkForUpdates) as? Bool ?? true
+        self.collapsedSections = Set(defaults.stringArray(forKey: Key.collapsedSections) ?? [])
         if let data = defaults.data(forKey: Key.history),
            let decoded = try? JSONDecoder().decode([HistoryEntry].self, from: data) {
             self.history = decoded

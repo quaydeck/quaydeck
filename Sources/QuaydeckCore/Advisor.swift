@@ -96,12 +96,13 @@ public struct Advisor: Sendable {
     private func unrecognisedAdvice(_ servers: [LocalServer]) -> [Advice] {
         servers.filter(\.unrecognised).map { server in
             let network = server.exposed ? " and is reachable on your network" : ""
+            let origin = server.agent.map { " Started by \($0.displayName)." } ?? ""
             return Advice(
                 id: "unrecognised:\(server.port)",
                 kind: .unrecognised,
                 severity: .critical,
                 icon: "exclamationmark.shield.fill",
-                text: "\(server.command) is listening on :\(server.port) from an untrusted path\(network).",
+                text: "\(server.command) is listening on :\(server.port) from an untrusted path\(network).\(origin)",
                 actionLabel: "Quit",
                 port: server.port
             )
@@ -123,12 +124,14 @@ public struct Advisor: Sendable {
     }
 
     /// Skipped for projects already flagged as duplicates: one clear message beats two
-    /// overlapping ones.
+    /// overlapping ones. Containers count too: Docker publishes on every interface
+    /// unless told `127.0.0.1:`, which is how a database ends up on the café wifi.
     private func exposedAdvice(_ servers: [LocalServer]) -> [Advice] {
         let duplicatePaths = Set(servers.filter { $0.isDevServer && $0.isDuplicate }
             .compactMap(\.projectPath))
         return servers
-            .filter { $0.isDevServer && $0.exposed && !(($0.projectPath).map(duplicatePaths.contains) ?? false) }
+            .filter { ($0.isDevServer || $0.isContainer) && $0.exposed
+                && !($0.isDevServer && (($0.projectPath).map(duplicatePaths.contains) ?? false)) }
             .map { server in
                 Advice(
                     id: "exposed:\(server.port)",
@@ -178,6 +181,7 @@ public struct Advisor: Sendable {
     }
 
     private func label(_ server: LocalServer) -> String {
-        server.project ?? server.systemLabel ?? server.command
+        if let container = server.container { return container.name }
+        return server.project ?? server.folder ?? server.systemLabel ?? server.command
     }
 }

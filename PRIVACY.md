@@ -4,7 +4,7 @@ Quaydeck is a menu bar utility that shows which ports are listening on your Mac.
 note describes exactly what it reads, what it stores, and what it sends. It is short
 because the app does very little.
 
-Last updated: 27 July 2026.
+Last updated: 13 October 2026.
 
 ## What Quaydeck sends
 
@@ -32,6 +32,21 @@ All of this stays on your Mac.
 - **Process details**, via `ps`: process id, parent process id, command line, elapsed
   time, CPU and memory. The parent chain is walked to see whether a coding agent
   started a server.
+- **Ten named environment variables** of a listening process, and no others:
+  `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
+  `CLAUDE_CONFIG_DIR`, `CODEX_THREAD_ID`, `CODEX_SHELL`, `CODEX_SANDBOX`, `CODEX_CI`,
+  `CODEX_HOME` and `AI_AGENT`. Claude Code and Codex set these on every command they
+  run, which is how Quaydeck knows an agent started a server after the agent itself
+  has exited. Every other variable, including any token or key, is discarded while
+  reading and never stored.
+- **Agent session titles**, for servers an agent started: the chat name from Codex's
+  `session_index.jsonl`, or the session title from the end of that session's Claude
+  Code transcript. Only the title is read out of either file, and it stays in memory.
+- **Running containers**, via `docker ps`, but only when Docker (or OrbStack, Colima,
+  Rancher) is holding a port: container name, image, status, published ports and
+  their compose project and folder. This talks to the Docker daemon over its local
+  socket. Stopping or restarting a container from the menu runs `docker stop` or
+  `docker restart` with that container's id.
 - **Project files**, for servers it can trace to a directory: `package.json` (for the
   project name and dependencies) and the presence of files like `go.mod`, `Cargo.toml`
   and `Gemfile`.

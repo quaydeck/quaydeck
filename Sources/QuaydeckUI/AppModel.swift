@@ -20,6 +20,7 @@ public final class AppModel: ObservableObject {
     private let advisor = Advisor()
     private let probe: HealthProbing
     private let control: ProcessControlling
+    private let containers: ContainerControlling
     private var inventory: PortInventory
 
     /// Poll quickly while the menu is open and slowly when it is not. Scanning forks
@@ -51,6 +52,7 @@ public final class AppModel: ObservableObject {
         self.entitlements = entitlements
         self.probe = probe
         self.control = ProcessControl(runner: runner)
+        self.containers = ContainerControl(runner: runner)
         self.inventory = PortInventory(runner: runner, userRoots: preferences.projectRoots)
 
         // SwiftUI needs to redraw when a preference changes, and the inventory needs
@@ -83,6 +85,18 @@ public final class AppModel: ObservableObject {
 
     public var devServers: [LocalServer] {
         snapshot.devServers.filter { $0.matches(query) }
+    }
+
+    /// Dev servers by who started them, each group already filtered by the search.
+    public var devServerGroups: [ServerGroup] {
+        ServerGroup.grouping(devServers)
+    }
+
+    public var containerGroups: [ContainerGroup] {
+        snapshot.containers.filter { group in
+            query.isEmpty || group.title.lowercased().contains(query)
+                || group.ports.contains { $0.matches(query) }
+        }
     }
 
     public var otherServers: [LocalServer] {
@@ -151,7 +165,7 @@ public final class AppModel: ObservableObject {
         let livePorts = Set(merged.servers.map(\.port))
         healthCache = healthCache.filter { livePorts.contains($0.key) }
 
-        probeHealth(of: merged.devServers)
+        probeHealth(of: merged.servers.filter(\.probeable))
     }
 
     private func probeHealth(of servers: [LocalServer]) {
@@ -185,7 +199,8 @@ public final class AppModel: ObservableObject {
 
         for server in fresh.servers where !knownPorts.contains(server.port) {
             if server.isDevServer {
-                Notifier.post(title: "New dev server on :\(server.port)", body: server.headline)
+                let origin = server.agent.map { " · started by \($0.displayName)" } ?? ""
+                Notifier.post(title: "New dev server on :\(server.port)", body: server.headline + origin)
             } else if server.unrecognised {
                 Notifier.post(title: "Unrecognised listener on :\(server.port)",
                               body: server.command + (server.exposed ? " · reachable on your network" : ""))
@@ -222,8 +237,60 @@ public final class AppModel: ObservableObject {
     }
 
     public func quit(_ server: LocalServer, force: Bool = false) {
+        // A container port is held by Docker's proxy. Signalling that pid would take
+        // down every container at once, so containers are stopped through Docker.
+        if let container = server.container {
+            stop(containerID: container.id)
+            return
+        }
         control.terminate(pid: server.pid, force: force)
         refreshShortly()
+    }
+
+    public func stop(_ group: ContainerGroup) { stop(containerID: group.container.id) }
+
+    public func restart(_ group: ContainerGroup) {
+        let containers = self.containers
+        let id = group.container.id
+        Task.detached(priority: .userInitiated) {
+            containers.restart(containerID: id)
+            await MainActor.run { self.refresh() }
+        }
+    }
+
+    /// `docker stop` can take ten seconds, so it never runs on the main thread.
+    private func stop(containerID id: String) {
+        let containers = self.containers
+        Task.detached(priority: .userInitiated) {
+            containers.stop(containerID: id)
+            await MainActor.run { self.refresh() }
+        }
+    }
+
+    public func open(_ group: ContainerGroup) { actions.open(group.primary) }
+
+    public func reveal(_ group: ContainerGroup) {
+        guard let path = group.projectPath else { return }
+        actions.reveal(path)
+    }
+
+    public func openTerminal(_ group: ContainerGroup) {
+        guard let path = group.projectPath else { return }
+        actions.openTerminal(at: path)
+    }
+
+    // MARK: - Sections
+
+    public func isCollapsed(_ section: String) -> Bool {
+        preferences.collapsedSections.contains(section)
+    }
+
+    public func toggleSection(_ section: String) {
+        if preferences.collapsedSections.contains(section) {
+            preferences.collapsedSections.remove(section)
+        } else {
+            preferences.collapsedSections.insert(section)
+        }
     }
 
     public func quitOtherInstances(of server: LocalServer) {

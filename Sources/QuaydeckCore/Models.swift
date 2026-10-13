@@ -6,6 +6,8 @@ public enum ListenerKind: String, Hashable, Sendable {
     case devServer
     /// Recognised local dev infrastructure: Postgres, Redis, Docker, and friends.
     case service
+    /// A port a Docker container publishes, held on the Mac by the runtime's proxy.
+    case container
     /// A known piece of macOS or an installed app. Background noise.
     case system
     /// Something listening from a location we do not trust. Worth a look.
@@ -35,7 +37,19 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
     public var etime: String?
     public var branch: String?
     public var dirty: Bool = false
-    public var startedByAgent: String?
+    /// The coding agent that started this server, or this unrecognised listener; nil
+    /// when you did, or when nothing says who did.
+    public var agent: CodingAgent?
+    /// The title of the agent session that started it: the Codex chat name or the
+    /// Claude Code session title.
+    public var agentSession: String?
+    /// For a server with no project manifest: the folder it serves, so the row still
+    /// says something more useful than "Python".
+    public var folder: String?
+    /// The container behind a published port, for `.container` listeners.
+    public var container: ContainerInfo?
+    /// The port inside that container.
+    public var containerPort: Int?
     public var respondsHTTP: Bool = false
     public var pinned: Bool = false
 
@@ -62,6 +76,7 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
 
     public var isDevServer: Bool { kind == .devServer }
     public var isService: Bool { kind == .service }
+    public var isContainer: Bool { kind == .container }
     public var unrecognised: Bool { kind == .unrecognised }
 
     public var busy: Bool { cpu >= 80 }
@@ -75,10 +90,32 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
     /// Untrusted *and* reachable from the network: the genuinely suspicious combination.
     public var suspicious: Bool { unrecognised && exposed }
 
+    /// Container ports that speak a database or broker protocol. Never sent an HTTP
+    /// probe: some servers count a garbled handshake as a failed login, and a probe
+    /// every few seconds would eventually get the Mac's address blocked.
+    static let nonHTTPContainerPorts: Set<Int> = [
+        1433, 1521, 2181, 3306, 4222, 5432, 5672, 6379, 7687, 9042, 9092, 11211, 26257, 27017,
+    ]
+
+    /// Whether the health probe should ask this port for a page.
+    public var probeable: Bool {
+        switch kind {
+        case .devServer: return true
+        case .container:
+            guard let containerPort else { return false }
+            return !Self.nonHTTPContainerPorts.contains(containerPort) && containerPort != 443
+        case .service, .system, .unrecognised: return false
+        }
+    }
+
     /// First line for a dev server, e.g. "acme-site · Astro".
     public var headline: String {
         var bits: [String] = []
-        if let project, !project.isEmpty { bits.append(project) }
+        if let project, !project.isEmpty {
+            bits.append(project)
+        } else if let folder, !folder.isEmpty {
+            bits.append(folder)
+        }
         if let framework, !framework.isEmpty { bits.append(framework) }
         if bits.isEmpty { bits.append(command) }
         return bits.joined(separator: " · ")
@@ -132,7 +169,6 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
         if let uptimeText { parts.append(uptimeText) }
         if let cpuText { parts.append(cpuText) }
         if let memText { parts.append(memText) }
-        if let startedByAgent { parts.append(startedByAgent) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -145,7 +181,69 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
         if let title, title.lowercased().contains(query) { return true }
         if let framework, framework.lowercased().contains(query) { return true }
         if let systemLabel, systemLabel.lowercased().contains(query) { return true }
+        if let folder, folder.lowercased().contains(query) { return true }
+        if let agent, agent.displayName.lowercased().contains(query) { return true }
+        if let agentSession, agentSession.lowercased().contains(query) { return true }
+        if let container {
+            if container.name.lowercased().contains(query) { return true }
+            if container.image.lowercased().contains(query) { return true }
+            if let compose = container.composeProject, compose.lowercased().contains(query) { return true }
+            if "docker".contains(query) { return true }
+        }
         return false
+    }
+}
+
+/// Dev servers that share an origin: the ones you started, or the ones one agent did.
+public struct ServerGroup: Identifiable, Hashable, Sendable {
+    /// Nil for servers you started yourself.
+    public let agent: CodingAgent?
+    public let servers: [LocalServer]
+
+    public var id: String { agent?.rawValue ?? "you" }
+}
+
+/// Every published port of one container, shown as one row.
+public struct ContainerGroup: Identifiable, Hashable, Sendable {
+    public let container: ContainerInfo
+    /// Sorted by host port.
+    public let ports: [LocalServer]
+
+    public var id: String { container.id }
+
+    /// The project the compose file lives in, when Quaydeck could trace it.
+    public var project: String? { ports.lazy.compactMap(\.project).first }
+    public var projectPath: String? { ports.lazy.compactMap(\.projectPath).first }
+
+    /// "papendorp-community", falling back to the compose project, then the
+    /// container name.
+    public var title: String {
+        project ?? container.composeProject ?? container.name
+    }
+
+    /// The compose service, when it says something the title does not.
+    public var service: String? {
+        guard let service = container.composeService, service != title else { return nil }
+        return service
+    }
+
+    /// The port a click should open: the first that answers HTTP, else the first
+    /// that could, else the first.
+    public var primary: LocalServer {
+        ports.first(where: \.respondsHTTP)
+            ?? ports.first(where: { $0.containerPort == 80 || $0.containerPort == 8080 })
+            ?? ports.first(where: \.probeable)
+            ?? ports[0]
+    }
+
+    public var exposed: Bool { ports.contains(where: \.exposed) }
+
+    /// ":58610→80  :58609→443"
+    public var portsText: String {
+        ports.map { port in
+            guard let inside = port.containerPort, inside != port.port else { return ":\(port.port)" }
+            return ":\(port.port)→\(inside)"
+        }.joined(separator: "  ")
     }
 }
 
@@ -186,14 +284,54 @@ public struct Snapshot: Hashable, Sendable {
             .sorted { ($0.pinned ? 0 : 1, $0.port) < ($1.pinned ? 0 : 1, $1.port) }
     }
 
-    /// Anything that is not a dev server, with the things worth a second look on top:
-    /// unrecognised first, then recognised services, then the rest by port.
+    /// Dev servers split by who started them: yours first, then one group per agent.
+    public var devServerGroups: [ServerGroup] {
+        ServerGroup.grouping(devServers)
+    }
+
+    /// Published container ports, one entry per container, ordered by compose project
+    /// so a stack's containers sit together.
+    public var containers: [ContainerGroup] {
+        ContainerGroup.grouping(servers.filter(\.isContainer))
+    }
+
+    /// Anything that is not a dev server or a container, with the things worth a
+    /// second look on top: unrecognised first, then recognised services, then the
+    /// rest by port.
     public var otherServers: [LocalServer] {
-        servers.filter { !$0.isDevServer }.sorted { a, b in
+        servers.filter { !$0.isDevServer && !$0.isContainer }.sorted { a, b in
             (a.unrecognised ? 0 : 1, a.isService ? 0 : 1, a.port)
                 < (b.unrecognised ? 0 : 1, b.isService ? 0 : 1, b.port)
         }
     }
 
     public var hasAlerts: Bool { servers.contains(where: \.unrecognised) }
+}
+
+extension ServerGroup {
+    /// Keeps the order it is given within each group.
+    public static func grouping(_ servers: [LocalServer]) -> [ServerGroup] {
+        var groups: [ServerGroup] = []
+        let yours = servers.filter { $0.agent == nil }
+        if !yours.isEmpty { groups.append(ServerGroup(agent: nil, servers: yours)) }
+        for agent in CodingAgent.allCases {
+            let started = servers.filter { $0.agent == agent }
+            if !started.isEmpty { groups.append(ServerGroup(agent: agent, servers: started)) }
+        }
+        return groups
+    }
+}
+
+extension ContainerGroup {
+    public static func grouping(_ servers: [LocalServer]) -> [ContainerGroup] {
+        var byID: [String: (container: ContainerInfo, ports: [LocalServer])] = [:]
+        for server in servers {
+            guard let container = server.container else { continue }
+            byID[container.id, default: (container, [])].ports.append(server)
+        }
+        return byID.values
+            .map { ContainerGroup(container: $0.container, ports: $0.ports.sorted { $0.port < $1.port }) }
+            .sorted { ($0.container.composeProject ?? $0.title, $0.title, $0.ports[0].port)
+                    < ($1.container.composeProject ?? $1.title, $1.title, $1.ports[0].port) }
+    }
 }

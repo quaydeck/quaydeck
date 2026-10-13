@@ -6,6 +6,11 @@ public protocol FileSystemProbe: Sendable {
     func fileExists(at path: String) -> Bool
     func isDirectory(at path: String) -> Bool
     func contents(at path: String) -> Data?
+    /// Names of the entries in a directory, or empty when it cannot be read.
+    func contentsOfDirectory(at path: String) -> [String]
+    /// The last `maxBytes` of a file. Session transcripts run to tens of megabytes and
+    /// only their most recent lines are wanted.
+    func tail(at path: String, maxBytes: Int) -> Data?
 }
 
 public struct RealFileSystem: FileSystemProbe {
@@ -23,6 +28,19 @@ public struct RealFileSystem: FileSystemProbe {
 
     public func contents(at path: String) -> Data? {
         FileManager.default.contents(atPath: path)
+    }
+
+    public func contentsOfDirectory(at path: String) -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+    }
+
+    public func tail(at path: String, maxBytes: Int) -> Data? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let end = try? handle.seekToEnd() else { return nil }
+        let start = end > UInt64(maxBytes) ? end - UInt64(maxBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil else { return nil }
+        return try? handle.readToEnd()
     }
 }
 
@@ -43,4 +61,16 @@ public struct StubFileSystem: FileSystemProbe {
     public func isDirectory(at path: String) -> Bool { directories.contains(path) }
 
     public func contents(at path: String) -> Data? { files[path] }
+
+    public func contentsOfDirectory(at path: String) -> [String] {
+        let prefix = path.hasSuffix("/") ? path : path + "/"
+        let children = (Array(directories) + Array(files.keys))
+            .filter { $0.hasPrefix(prefix) }
+            .compactMap { $0.dropFirst(prefix.count).split(separator: "/").first.map(String.init) }
+        return Array(Set(children)).sorted()
+    }
+
+    public func tail(at path: String, maxBytes: Int) -> Data? {
+        files[path].map { $0.suffix(maxBytes) }
+    }
 }

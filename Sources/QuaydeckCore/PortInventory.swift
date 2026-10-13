@@ -13,11 +13,19 @@ public final class PortInventory: @unchecked Sendable {
     private let git: GitInspector
     private let classifier: Classifier
     private let busyDetector: BusyProcessDetector
+    private let environment: EnvironmentProbing
+    private let agents = AgentDetector()
+    private let sessionTitles: SessionTitles
+    private let docker: DockerSource
 
     public init(runner: CommandRunner = ShellRunner(),
                 fileSystem: FileSystemProbe = RealFileSystem(),
+                environment: EnvironmentProbing = ProcessEnvironment(),
                 home: String = NSHomeDirectory(),
                 userRoots: [String] = []) {
+        self.environment = environment
+        self.sessionTitles = SessionTitles(fileSystem: fileSystem, home: home)
+        self.docker = DockerSource(runner: runner, fileSystem: fileSystem, home: home)
         self.listenerSource = ListenerSource(runner: runner)
         self.processSource = ProcessSource(runner: runner)
         self.resolver = ProjectResolver(fileSystem: fileSystem, home: home, userRoots: userRoots)
@@ -50,6 +58,11 @@ public final class PortInventory: @unchecked Sendable {
         let processInfo = processSource.info(for: pids)
         let workingDirectories = listenerSource.workingDirectories(for: pids)
 
+        // Only ask Docker when its proxy is actually holding a port.
+        let published = byPort.values.contains { DockerSource.isContainerRuntime(command: $0.command) }
+            ? docker.publishedPorts()
+            : [:]
+
         var servers = byPort.map { port, holder -> LocalServer in
             let info = processInfo[holder.pid]
             var server = LocalServer(
@@ -65,7 +78,11 @@ public final class PortInventory: @unchecked Sendable {
             server.cpu = info?.cpu ?? 0
             server.memMB = (info?.rssKB ?? 0) / 1024
             server.exposed = holder.exposed
-            resolveContext(&server, processInfo: processInfo, now: now)
+            if let mapping = published[port], DockerSource.isContainerRuntime(command: server.command) {
+                resolveContainer(&server, mapping)
+            } else {
+                resolveContext(&server, processInfo: processInfo, now: now)
+            }
             return server
         }
 
@@ -91,9 +108,30 @@ public final class PortInventory: @unchecked Sendable {
                                              command: server.command,
                                              projectPath: project?.path)
 
-        let (kind, label) = classifier.classify(command: server.command,
+        var (kind, label) = classifier.classify(command: server.command,
                                                 args: server.args,
                                                 hasProject: project != nil)
+
+        // Who started it. Asked for dev servers; for project-less runtimes, which are
+        // exactly the previews agents leave in chat folders; and for unrecognised
+        // listeners, so an alert can say "started by Claude". That stays an alert:
+        // markers are only environment variables, which anything can set, so they
+        // explain a listener but never vouch for one.
+        var attribution: AgentAttribution?
+        let projectless = project == nil && kind != .service
+            && classifier.mightBeProjectlessServer(command: server.command, args: server.args, cwd: server.cwd)
+        if kind == .devServer || projectless || kind == .unrecognised {
+            attribution = agents.attribute(
+                environment: environment.markers(of: server.pid),
+                ancestry: ancestry(of: server.pid, processInfo: processInfo)
+            )
+        }
+        if projectless, classifier.isProjectlessServer(command: server.command, args: server.args,
+                                                       cwd: server.cwd, startedByAgent: attribution != nil) {
+            kind = .devServer
+            label = nil
+            server.folder = Self.folderName(servedBy: server.args, cwd: server.cwd)
+        }
         server.kind = kind
 
         switch kind {
@@ -103,11 +141,63 @@ public final class PortInventory: @unchecked Sendable {
                 server.branch = status.branch
                 server.dirty = status.dirty
             }
-            server.startedByAgent = classifier.agentName(inAncestry: ancestry(of: server.pid,
-                                                                             processInfo: processInfo))
-        case .service, .system, .unrecognised:
+            if let attribution {
+                server.agent = attribution.agent
+                server.agentSession = sessionTitles.title(for: attribution, now: now)
+            }
+        case .unrecognised:
+            server.systemLabel = label
+            server.agent = attribution?.agent
+        case .service, .system, .container:
             server.systemLabel = label
         }
+    }
+
+    /// A published container port. The process holding it is the runtime's proxy, so
+    /// its CPU, memory and uptime describe Docker, not this container, and are dropped.
+    private func resolveContainer(_ server: inout LocalServer, _ mapping: PublishedPort) {
+        server.kind = .container
+        server.container = mapping.container
+        server.containerPort = mapping.containerPort
+        server.systemLabel = mapping.container.imageLabel
+        server.cpu = 0
+        server.memMB = 0
+        server.etime = nil
+        if let directory = mapping.container.composeDirectory,
+           let project = resolver.resolve(cwd: directory, args: "") {
+            server.project = project.name
+            server.projectPath = project.path
+        }
+    }
+
+    /// Folders that say nothing on their own; the one above them names the work.
+    static let genericFolders: Set<String> = [
+        "outputs", "output", "out", "dist", "build", "public", "site", "www", "static",
+        "scratchpad", "tmp", "temp", "preview", "previews",
+    ]
+
+    /// The folder a project-less server is serving: `--directory X` when given,
+    /// otherwise its working directory. Named by its last meaningful component.
+    static func folderName(servedBy args: String, cwd: String) -> String? {
+        var directory = cwd
+        let tokens = args.split(separator: " ").map(String.init)
+        if let flag = tokens.firstIndex(where: { $0 == "--directory" || $0 == "-d" }), flag + 1 < tokens.count {
+            let value = tokens[flag + 1]
+            directory = value.hasPrefix("/") ? value : cwd + "/" + value
+        } else if let inline = tokens.first(where: { $0.hasPrefix("--directory=") }) {
+            let value = String(inline.dropFirst("--directory=".count))
+            directory = value.hasPrefix("/") ? value : cwd + "/" + value
+        }
+        var components = directory.split(separator: "/").map(String.init)
+        while components.last == "." { components.removeLast() }
+        guard let last = components.last else { return nil }
+        if genericFolders.contains(last.lowercased()), components.count >= 2 {
+            let parent = components[components.count - 2]
+            // A Claude scratchpad sits under a session uuid; "scratchpad" is clearer.
+            let looksGenerated = parent.count >= 32 && parent.filter({ $0 == "-" }).count >= 4
+            if !looksGenerated, !parent.hasPrefix("-") { return parent + "/" + last }
+        }
+        return last
     }
 
     /// Argument vectors of a process and its ancestors, nearest first. Used to work

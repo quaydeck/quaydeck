@@ -31,10 +31,23 @@ public struct MenuView: View {
             // on a short display.
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    if model.devServers.isEmpty {
+                    if model.devServers.isEmpty && model.containerGroups.isEmpty {
                         emptyState
                     } else {
-                        ForEach(model.devServers) { row($0, isDev: true) }
+                        ForEach(model.devServerGroups) { group in
+                            if showSectionHeaders {
+                                sectionHeader(Origin(group), count: group.servers.count)
+                            }
+                            if expanded(Origin(group).id) {
+                                ForEach(group.servers) { row($0, isDev: true) }
+                            }
+                        }
+                        if !model.containerGroups.isEmpty {
+                            sectionHeader(.docker, count: model.containerGroups.count)
+                            if expanded(Origin.docker.id) {
+                                ForEach(model.containerGroups) { containerRow($0) }
+                            }
+                        }
                     }
 
                     sectionDivider
@@ -74,15 +87,41 @@ public struct MenuView: View {
         }
     }
 
+    /// Headers only earn their space once there is more than "your servers" to tell
+    /// apart.
+    private var showSectionHeaders: Bool {
+        let groups = model.devServerGroups
+        return groups.count > 1 || groups.contains { $0.agent != nil } || !model.containerGroups.isEmpty
+    }
+
+    /// Searching opens every section, so a match is never hidden in a folded one.
+    private func expanded(_ section: String) -> Bool {
+        searching || !model.isCollapsed(section)
+    }
+
     /// Fits the content rather than filling the screen, capped so a machine with
     /// thirty listeners still produces a usable popover.
     private var middleHeight: CGFloat {
-        let devRows = model.devServers.isEmpty ? 1.6 : Double(model.devServers.count)
-        let devHeight = devRows * 50
+        var devHeight = 0.0
+        if model.devServers.isEmpty && model.containerGroups.isEmpty {
+            devHeight = 1.6 * 50
+        } else {
+            for group in model.devServerGroups {
+                if showSectionHeaders { devHeight += 26 }
+                guard expanded(Origin(group).id) else { continue }
+                for server in group.servers {
+                    devHeight += server.agent != nil && server.agentSession != nil ? 57 : 50
+                }
+            }
+            if !model.containerGroups.isEmpty {
+                devHeight += 26
+                if expanded(Origin.docker.id) { devHeight += Double(model.containerGroups.count) * 42 }
+            }
+        }
         let otherHeight = showingOthers ? Double(max(model.otherServers.count, 1)) * 42 : 0
         let historyHeight = (model.recentlyStopped.isEmpty ? 0 : 36.0)
             + (showHistory ? Double(model.recentlyStopped.count) * 38 : 0)
-        return CGFloat(min(devHeight + otherHeight + historyHeight + 58, 480))
+        return CGFloat(min(devHeight + otherHeight + historyHeight + 58, 540))
     }
 
     // MARK: - Chrome
@@ -95,10 +134,18 @@ public struct MenuView: View {
             if model.scanning {
                 ProgressView().controlSize(.small).scaleEffect(0.7)
             }
-            Text("\(model.snapshot.devServers.count) server\(model.snapshot.devServers.count == 1 ? "" : "s")")
+            Text(countText)
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
+    }
+
+    private var countText: String {
+        let servers = model.snapshot.devServers.count
+        let containers = model.snapshot.containers.count
+        var text = "\(servers) server\(servers == 1 ? "" : "s")"
+        if containers > 0 { text += " · \(containers) container\(containers == 1 ? "" : "s")" }
+        return text
     }
 
     private var searchField: some View {
@@ -207,7 +254,7 @@ public struct MenuView: View {
                             .font(.system(size: 8)).foregroundStyle(.teal)
                             .help("Local dev service")
                     }
-                    Text(":\(server.port)")
+                    Text(verbatim: ":\(server.port)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     Text(isDev ? server.headline : server.noiseTitle)
                         .font(.system(size: 12)).lineLimit(1)
@@ -223,9 +270,19 @@ public struct MenuView: View {
                 if isDev, let subtitle = server.subtitle {
                     Text(subtitle).font(.system(size: 10.5))
                         .foregroundStyle(.secondary).lineLimit(1)
-                } else if !isDev {
+                }
+                if isDev, server.agent != nil, let session = server.agentSession {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.bubble").font(.system(size: 8.5))
+                        Text(session).lineLimit(1).truncationMode(.tail)
+                    }
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .help("Started in \(server.agent?.displayName ?? "an agent") session “\(session)”")
+                }
+                if !isDev {
                     Text(server.unrecognised
                          ? "unrecognised · \(server.command) · PID \(server.pid)"
+                            + (server.agent.map { " · started by \($0.displayName)" } ?? "")
                          : "\(server.command) · PID \(server.pid)")
                         .font(.system(size: 10.5))
                         .foregroundStyle(server.unrecognised ? .orange : .secondary)
@@ -337,6 +394,173 @@ public struct MenuView: View {
         Button("Force quit (SIGKILL)", role: .destructive) { model.quit(server, force: true) }
     }
 
+    // MARK: - Origin sections
+
+    /// One heading per origin: the servers you started, those each agent started, and
+    /// Docker's containers.
+    struct Origin {
+        let id: String
+        let title: String
+        let symbol: String
+        let tint: Color
+
+        static let you = Origin(id: "you", title: "Yours", symbol: "person.fill", tint: .secondary)
+        static let docker = Origin(id: "docker", title: "Docker", symbol: "shippingbox.fill",
+                                    tint: Color(red: 0.11, green: 0.39, blue: 0.93))
+
+        init(id: String, title: String, symbol: String, tint: Color) {
+            self.id = id
+            self.title = title
+            self.symbol = symbol
+            self.tint = tint
+        }
+
+        init(_ group: ServerGroup) {
+            guard let agent = group.agent else { self = .you; return }
+            switch agent {
+            case .claude:
+                self.init(id: agent.rawValue, title: agent.displayName, symbol: "asterisk",
+                          tint: Color(red: 0.85, green: 0.47, blue: 0.34))
+            case .codex:
+                self.init(id: agent.rawValue, title: agent.displayName,
+                          symbol: "chevron.left.forwardslash.chevron.right", tint: .primary)
+            case .cursor, .copilot, .aider:
+                self.init(id: agent.rawValue, title: agent.displayName, symbol: "sparkles", tint: .secondary)
+            }
+        }
+    }
+
+    private func sectionHeader(_ section: Origin, count: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { model.toggleSection(section.id) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: expanded(section.id) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                    .frame(width: 8)
+                Image(systemName: section.symbol)
+                    .font(.system(size: 9.5, weight: .semibold)).foregroundStyle(section.tint)
+                Text(section.title).font(.system(size: 11, weight: .semibold))
+                Text(verbatim: "\(count)").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(searching)
+    }
+
+    // MARK: - Containers
+
+    @ViewBuilder
+    private func containerRow(_ group: ContainerGroup) -> some View {
+        let primary = group.primary
+        let hovered = hoveredPort == primary.port
+        let confirming = pendingQuit == primary.port
+
+        HStack(alignment: .top, spacing: 9) {
+            Circle()
+                .fill(containerColour(group))
+                .frame(width: 7, height: 7)
+                .padding(.top, 5)
+                .help(group.container.status)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(group.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    if let service = group.service {
+                        Text(service).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if group.exposed {
+                        Image(systemName: "globe").font(.system(size: 9)).foregroundStyle(.orange)
+                            .help("Published on every interface: reachable on your local network")
+                    }
+                }
+                Text(containerSubtitle(group))
+                    .font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            if confirming {
+                HStack(spacing: 6) {
+                    Text("Stop?").font(.system(size: 10, weight: .semibold)).foregroundStyle(.red)
+                    iconButton("checkmark.circle.fill", colour: .red, help: "Confirm") {
+                        model.stop(group); pendingQuit = nil
+                    }
+                    iconButton("xmark.circle", colour: .secondary, help: "Cancel") {
+                        pendingQuit = nil
+                    }
+                }
+            } else if hovered {
+                HStack(spacing: 7) {
+                    iconButton("arrow.clockwise", colour: .secondary, help: "Restart container") {
+                        model.restart(group)
+                    }
+                    iconButton("stop.circle", colour: .red.opacity(0.85), help: "Stop \(group.container.name)") {
+                        pendingQuit = primary.port
+                    }
+                    iconButton("arrow.up.right.square", colour: .secondary, help: "Open \(primary.url)") {
+                        model.open(group)
+                    }
+                }
+            } else {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary).opacity(0.3)
+            }
+        }
+        .padding(.vertical, 5).padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(rowBackground(primary, hovered: hovered, confirming: confirming))
+        .onTapGesture { if !confirming { model.open(group) } }
+        .onHover { inside in
+            hoveredPort = inside ? primary.port : (hoveredPort == primary.port ? nil : hoveredPort)
+        }
+        .contextMenu { containerMenu(group) }
+    }
+
+    /// ":58610→80  :58609→443 +1 · Up 3 minutes (healthy)"
+    private func containerSubtitle(_ group: ContainerGroup) -> String {
+        let shown = group.ports.prefix(3).map { port -> String in
+            guard let inside = port.containerPort, inside != port.port else { return ":\(port.port)" }
+            return ":\(port.port)→\(inside)"
+        }
+        var ports = shown.joined(separator: "  ")
+        if group.ports.count > 3 { ports += " +\(group.ports.count - 3)" }
+        var parts = [ports]
+        if let title = group.primary.title, !title.isEmpty { parts.append("“\(title)”") }
+        parts.append(group.container.status)
+        return parts.joined(separator: " · ")
+    }
+
+    private func containerColour(_ group: ContainerGroup) -> Color {
+        let status = group.container.status.lowercased()
+        if group.primary.erroring || status.contains("unhealthy") { return .orange }
+        if group.primary.respondsHTTP || status.contains("(healthy)") { return .green }
+        return .secondary.opacity(0.45)
+    }
+
+    @ViewBuilder
+    private func containerMenu(_ group: ContainerGroup) -> some View {
+        ForEach(group.ports) { port in
+            Button("Open \(port.url)" + (port.containerPort.map { " (→ \($0))" } ?? "")) {
+                model.open(port)
+            }
+        }
+        Button("Copy URL") { model.copyURL(group.primary) }
+        if group.projectPath != nil {
+            Button("Reveal project in Finder") { model.reveal(group) }
+            Button("Open project in Terminal") { model.openTerminal(group) }
+        }
+        Divider()
+        Text(verbatim: "\(group.container.imageLabel) · \(group.container.name)")
+        Button("Restart container") { model.restart(group) }
+        Button("Stop container", role: .destructive) { model.stop(group) }
+    }
+
     // MARK: - Sections
 
     private var allPortsHeader: some View {
@@ -347,7 +571,7 @@ public struct MenuView: View {
                 Image(systemName: showingOthers ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                 Text("Show all ports").font(.system(size: 11.5))
-                Text("(\(model.snapshot.otherServers.count))")
+                Text(verbatim: "(\(model.snapshot.otherServers.count))")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 if model.snapshot.hasAlerts {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -373,7 +597,7 @@ public struct MenuView: View {
                     .font(.system(size: 9, weight: .semibold))
                 Image(systemName: "clock.arrow.circlepath").font(.system(size: 10))
                 Text("Recently stopped").font(.system(size: 11.5))
-                Text("(\(model.recentlyStopped.count))")
+                Text(verbatim: "(\(model.recentlyStopped.count))")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 Spacer()
             }
@@ -390,7 +614,7 @@ public struct MenuView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.project + (entry.framework.map { " · \($0)" } ?? ""))
                     .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-                Text("was :\(entry.lastPort)").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(verbatim: "was :\(entry.lastPort)").font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
             iconButton("play.circle", colour: .green, help: "Restart in Terminal") {
