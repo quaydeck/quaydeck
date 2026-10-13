@@ -128,8 +128,9 @@ public struct SettingsView: View {
 
     private var about: some View {
         VStack(spacing: 12) {
-            Image(systemName: "sailboat.fill")
-                .font(.system(size: 44)).foregroundStyle(.tint)
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable().frame(width: 72, height: 72)
+                .accessibilityHidden(true)
             Text("Quaydeck").font(.title2).bold()
             Text("Version \(Self.version) (\(Self.build))")
                 .font(.caption).foregroundStyle(.secondary)

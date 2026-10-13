@@ -65,7 +65,7 @@ public final class PortInventory: @unchecked Sendable {
         }
         self.resolver = ProjectResolver(fileSystem: fileSystem, home: home, userRoots: userRoots)
         self.frameworks = FrameworkDetector(fileSystem: fileSystem)
-        self.git = GitInspector(runner: runner)
+        self.git = GitInspector(runner: runner, gitPath: GitInspector.locate(fileSystem: fileSystem))
         self.classifier = Classifier(home: home)
         self.busyDetector = BusyProcessDetector(processes: processSource, resolver: resolver)
     }
@@ -236,6 +236,10 @@ public final class PortInventory: @unchecked Sendable {
             if let attribution = context.attribution {
                 server.agent = attribution.agent
                 server.agentSession = sessionTitles.title(for: attribution, now: now)
+                server.agentSessionID = attribution.sessionID
+                server.agentHome = attribution.dataDirectory
+                server.agentDetached = attribution.detached
+                server.agentSessionDirectory = sessionTitles.directory(for: attribution)
             }
         case .unrecognised:
             server.systemLabel = context.label
@@ -255,7 +259,7 @@ public final class PortInventory: @unchecked Sendable {
         server.cpu = 0
         server.memMB = 0
         server.etime = nil
-        if let directory = mapping.container.composeDirectory,
+        if let directory = mapping.container.ddevRoot ?? mapping.container.composeDirectory,
            let project = resolver.resolve(cwd: directory, args: "") {
             server.project = project.name
             server.projectPath = project.path

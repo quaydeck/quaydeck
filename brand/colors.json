@@ -1,0 +1,12 @@
+{
+  "harbour-deep": "#0B1D32",
+  "harbour": "#14374F",
+  "brass": "#F1C47B",
+  "brass-dim": "#C79A55",
+  "water": "#47A7A6",
+  "ink": "#EAF1F7",
+  "muted": "#8EA5B8",
+  "status-ok": "#5FC98A",
+  "status-warn": "#E9A44E",
+  "status-alert": "#E8705F"
+}

@@ -55,7 +55,8 @@ public final class AppModel: ObservableObject {
                 loginItem: LoginItem? = nil,
                 entitlements: Entitlements = FreeEntitlements(),
                 probe: HealthProbing = HealthProbe(),
-                runner: CommandRunner = ShellRunner()) {
+                runner: CommandRunner = ShellRunner(),
+                inventory injected: PortInventory? = nil) {
         let preferences = preferences ?? Preferences()
         let loginItem = loginItem ?? LoginItem()
         self.preferences = preferences
@@ -64,7 +65,9 @@ public final class AppModel: ObservableObject {
         self.probe = probe
         self.control = ProcessControl(runner: runner)
         self.containers = ContainerControl(runner: runner)
-        self.inventory = PortInventory(runner: runner, userRoots: preferences.projectRoots)
+        // An injected inventory is a recorded machine (screenshots, previews); it is
+        // kept as is rather than rebuilt when the project folders change.
+        self.inventory = injected ?? PortInventory(runner: runner, userRoots: preferences.projectRoots)
 
         // SwiftUI needs to redraw when a preference changes, and the inventory needs
         // rebuilding when the project roots do.
@@ -73,6 +76,7 @@ public final class AppModel: ObservableObject {
             .store(in: &cancellables)
         preferences.$projectRoots
             .dropFirst()
+            .filter { _ in injected == nil }
             .sink { [weak self] roots in
                 guard let self else { return }
                 self.inventory = PortInventory(runner: runner, userRoots: roots)
@@ -346,7 +350,32 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    public func open(_ group: ContainerGroup) { actions.open(group.primary) }
+    public func open(_ group: ContainerGroup) {
+        guard let url = URL(string: group.openURL) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Agent sessions
+
+    /// Back to the session that started a server: the Codex chat in the Codex app, or
+    /// the Claude session resumed in Terminal.
+    @discardableResult
+    public func openSession(of server: LocalServer) -> Bool {
+        if let url = SessionLinks.codexThreadURL(for: server) {
+            return NSWorkspace.shared.open(url)
+        }
+        if let command = SessionLinks.claudeResumeCommand(for: server) {
+            return actions.runInTerminal(command)
+        }
+        return false
+    }
+
+    public func copySessionCommand(of server: LocalServer) {
+        guard let command = SessionLinks.claudeResumeCommand(for: server)
+                ?? SessionLinks.codexResumeCommand(for: server) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+    }
 
     /// "localhost:55003", for ports a browser cannot use.
     public func copyAddress(_ server: LocalServer) {
@@ -444,6 +473,9 @@ public final class AppModel: ObservableObject {
             if let port = item.port, let server = snapshot.servers.first(where: { $0.port == port }) {
                 open(server)
             }
+        case .leftBehind:
+            for server in snapshot.servers where server.leftBehind { control.terminate(pid: server.pid, force: false) }
+            refreshShortly()
         case .unrecognised, .exposed, .memoryHog, .stale:
             if let port = item.port, let server = snapshot.servers.first(where: { $0.port == port }) {
                 quit(server)

@@ -67,8 +67,9 @@ public struct WelcomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "sailboat.fill")
-                .font(.system(size: 34)).foregroundStyle(.tint)
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable().frame(width: 56, height: 56)
+                .accessibilityHidden(true)
             Text("Quaydeck").font(.system(size: 24, weight: .bold))
             Text("Every dev server running on this Mac, in your menu bar.")
                 .font(.system(size: 13)).foregroundStyle(.secondary)

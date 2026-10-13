@@ -23,11 +23,16 @@ public struct AgentAttribution: Hashable, Sendable {
     /// The agent's own data directory, when the process names one
     /// (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Nil means the default.
     public let dataDirectory: String?
+    /// The agent is no longer anywhere in the process's parent chain: the chat or
+    /// command that started it has ended, and only its environment remembers.
+    public let detached: Bool
 
-    public init(agent: CodingAgent, sessionID: String? = nil, dataDirectory: String? = nil) {
+    public init(agent: CodingAgent, sessionID: String? = nil, dataDirectory: String? = nil,
+                detached: Bool = false) {
         self.agent = agent
         self.sessionID = sessionID
         self.dataDirectory = dataDirectory
+        self.detached = detached
     }
 }
 
@@ -59,7 +64,7 @@ public struct AgentDetector: Sendable {
     public func attribute(environment: [String: String], ancestry: [String]) -> AgentAttribution? {
         for args in ancestry {
             if let agent = agent(launchedBy: args) {
-                return attribution(for: agent, environment: environment)
+                return attribution(for: agent, environment: environment, detached: false)
             }
         }
 
@@ -77,8 +82,8 @@ public struct AgentDetector: Sendable {
         // Both sets of markers means one agent ran the other, and the environment
         // cannot say which is innermost. Codex driven from a Claude session is the
         // common arrangement, and its markers are set by the inner command.
-        if codex { return attribution(for: .codex, environment: environment) }
-        if claude { return attribution(for: .claude, environment: environment) }
+        if codex { return attribution(for: .codex, environment: environment, detached: true) }
+        if claude { return attribution(for: .claude, environment: environment, detached: true) }
         return nil
     }
 
@@ -98,18 +103,21 @@ public struct AgentDetector: Sendable {
         return nil
     }
 
-    private func attribution(for agent: CodingAgent, environment: [String: String]) -> AgentAttribution {
+    private func attribution(for agent: CodingAgent, environment: [String: String],
+                             detached: Bool) -> AgentAttribution {
         switch agent {
         case .claude:
             return AgentAttribution(agent: agent,
                                     sessionID: environment["CLAUDE_CODE_SESSION_ID"],
-                                    dataDirectory: environment["CLAUDE_CONFIG_DIR"])
+                                    dataDirectory: environment["CLAUDE_CONFIG_DIR"],
+                                    detached: detached)
         case .codex:
             return AgentAttribution(agent: agent,
                                     sessionID: environment["CODEX_THREAD_ID"],
-                                    dataDirectory: environment["CODEX_HOME"])
+                                    dataDirectory: environment["CODEX_HOME"],
+                                    detached: detached)
         case .cursor, .copilot, .aider:
-            return AgentAttribution(agent: agent)
+            return AgentAttribution(agent: agent, detached: detached)
         }
     }
 
@@ -133,6 +141,7 @@ public final class SessionTitles: @unchecked Sendable {
     private let lock = NSLock()
     private var codexIndex: [String: (titles: [String: String], read: Date)] = [:]
     private var claudeTitles: [String: (title: String?, read: Date)] = [:]
+    private var claudeDirectories: [String: String] = [:]
     private var claudePaths: [String: String] = [:]
 
     /// Enough of a transcript's end to contain its latest title line.
@@ -196,6 +205,7 @@ public final class SessionTitles: @unchecked Sendable {
         if let path = claudeTranscript(session, directory: directory),
            let data = fileSystem.tail(at: path, maxBytes: Self.transcriptTail) {
             title = Self.latestClaudeTitle(in: data)
+            if let folder = Self.latestClaudeDirectory(in: data) { claudeDirectories[session] = folder }
         }
         claudeTitles[session] = (title, now)
         return title
@@ -211,6 +221,24 @@ public final class SessionTitles: @unchecked Sendable {
                 claudePaths[session] = candidate
                 return candidate
             }
+        }
+        return nil
+    }
+
+    /// The folder a Claude session runs in, which `claude --resume` has to be started
+    /// from. Only meaningful after `title(for:)` has read the transcript.
+    public func directory(for attribution: AgentAttribution) -> String? {
+        guard attribution.agent == .claude, let session = attribution.sessionID else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        return claudeDirectories[session]
+    }
+
+    /// The last `"cwd":"…"` in the transcript's tail: every message records it.
+    static func latestClaudeDirectory(in data: Data) -> String? {
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n").reversed() {
+            guard let range = line.range(of: #""cwd":"[^"\\]+""#, options: .regularExpression) else { continue }
+            return String(line[range].dropFirst(#""cwd":""#.count).dropLast())
         }
         return nil
     }

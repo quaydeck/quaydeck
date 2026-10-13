@@ -1,0 +1,13 @@
+/* Quaydeck palette. Generated from colors.json; edit both together. */
+:root {
+  --qd-harbour-deep: #0B1D32;
+  --qd-harbour: #14374F;
+  --qd-brass: #F1C47B;
+  --qd-brass-dim: #C79A55;
+  --qd-water: #47A7A6;
+  --qd-ink: #EAF1F7;
+  --qd-muted: #8EA5B8;
+  --qd-status-ok: #5FC98A;
+  --qd-status-warn: #E9A44E;
+  --qd-status-alert: #E8705F;
+}

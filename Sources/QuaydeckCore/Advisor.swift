@@ -5,7 +5,7 @@ import Foundation
 /// snapshot.
 public struct Advice: Identifiable, Hashable, Sendable {
     public enum Kind: String, Sendable {
-        case unrecognised, exposed, memoryHog, duplicate, stale, runaway, erroring
+        case unrecognised, exposed, memoryHog, duplicate, stale, runaway, erroring, leftBehind
     }
 
     public enum Severity: Int, Comparable, Sendable {
@@ -59,6 +59,7 @@ public struct Advisor: Sendable {
         result += exposedAdvice(snapshot.servers)
         result += duplicateAdvice(snapshot.servers)
         result += staleAdvice(snapshot.servers)
+        result += leftBehindAdvice(snapshot.servers)
         return result.sorted { ($0.severity, $0.id) < ($1.severity, $1.id) }
     }
 
@@ -180,6 +181,24 @@ public struct Advisor: Sendable {
                     port: server.port
                 )
             }
+    }
+
+    /// Previews an agent started and then walked away from. One line for all of
+    /// them, with one action, because they are almost always cleared together.
+    private func leftBehindAdvice(_ servers: [LocalServer]) -> [Advice] {
+        let stale = servers.filter(\.leftBehind).sorted { $0.port < $1.port }
+        guard let first = stale.first else { return [] }
+        let agents = Set(stale.compactMap { $0.agent?.displayName }).sorted().joined(separator: " and ")
+        let subject = stale.count == 1 ? "\(label(first)) on :\(first.port) is" : "\(stale.count) servers are"
+        return [Advice(
+            id: "leftBehind:" + stale.map { String($0.port) }.joined(separator: ","),
+            kind: .leftBehind,
+            severity: .info,
+            icon: "moon.zzz",
+            text: "\(subject) still running from \(agents) sessions that have ended.",
+            actionLabel: stale.count == 1 ? "Quit" : "Quit all",
+            port: first.port
+        )]
     }
 
     private func label(_ server: LocalServer) -> String {

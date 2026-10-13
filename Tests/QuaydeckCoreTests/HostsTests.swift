@@ -77,12 +77,13 @@ final class HostsTests: XCTestCase {
     /// empty. The environment still remembers.
     func testMarkersAttributeAServerWhoseAgentHasExited() {
         let codex = detector.attribute(environment: ["CODEX_THREAD_ID": "t-1"], ancestry: ["python3 -m http.server"])
-        XCTAssertEqual(codex, AgentAttribution(agent: .codex, sessionID: "t-1"))
+        XCTAssertEqual(codex, AgentAttribution(agent: .codex, sessionID: "t-1", detached: true))
 
         let claude = detector.attribute(
             environment: ["CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "s-1", "CLAUDE_CONFIG_DIR": "/Users/dev/.claude-team"],
             ancestry: ["node vite"])
-        XCTAssertEqual(claude, AgentAttribution(agent: .claude, sessionID: "s-1", dataDirectory: "/Users/dev/.claude-team"))
+        XCTAssertEqual(claude, AgentAttribution(agent: .claude, sessionID: "s-1", dataDirectory: "/Users/dev/.claude-team",
+                                                detached: true))
     }
 
     func testTheParentChainBeatsInheritedMarkers() {
@@ -154,6 +155,22 @@ final class HostsTests: XCTestCase {
         XCTAssertEqual(GitInspector.parse(""), .unknown, "not a repository")
     }
 
+    /// Without developer tools, /usr/bin/git opens Apple's install dialog. It must never
+    /// be run on such a Mac, let alone every few seconds.
+    func testNeverRunsTheGitShimWithoutDeveloperTools() {
+        XCTAssertNil(GitInspector.locate(fileSystem: StubFileSystem(files: ["/usr/bin/git": ""])))
+        XCTAssertEqual(GitInspector.locate(fileSystem: StubFileSystem(files: [
+            "/usr/bin/git": "", "/Library/Developer/CommandLineTools/usr/bin/git": "",
+        ])), "/usr/bin/git")
+        XCTAssertEqual(GitInspector.locate(fileSystem: StubFileSystem(files: ["/opt/homebrew/bin/git": ""])),
+                       "/opt/homebrew/bin/git")
+
+        let runner = RecordingRunner()
+        let git = GitInspector(runner: runner, gitPath: nil)
+        XCTAssertEqual(git.status(at: "/Users/dev/code/shop"), .unknown)
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
     // MARK: - Kernel
 
     /// Opens real sockets and checks the kernel path sees them exactly as lsof would.
@@ -197,6 +214,101 @@ final class HostsTests: XCTestCase {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
         }
         return (fd, Int(UInt16(bigEndian: address.sin_port)))
+    }
+
+    // MARK: - Back to the session
+
+    private func agentServer(_ agent: CodingAgent, id: String?) -> LocalServer {
+        var server = LocalServer(port: 4321, pid: 42, command: "node", args: "", cwd: "/Users/dev/code/shop")
+        server.kind = .devServer
+        server.agent = agent
+        server.agentSessionID = id
+        return server
+    }
+
+    func testBuildsTheClaudeResumeCommandInTheSessionsFolder() {
+        var server = agentServer(.claude, id: "67e22b1b-577d-4466-910d-9d732a445454")
+        server.agentSessionDirectory = "/Users/dev/code/it's shop"
+        server.agentHome = "/Users/dev/.claude-team"
+        XCTAssertEqual(SessionLinks.claudeResumeCommand(for: server),
+                       "cd '/Users/dev/code/it'\\''s shop' && CLAUDE_CONFIG_DIR='/Users/dev/.claude-team' "
+                       + "claude --resume 67e22b1b-577d-4466-910d-9d732a445454")
+    }
+
+    /// The id comes from another process's environment and lands in a shell.
+    func testRefusesAnythingButAPlainSessionID() {
+        for hostile in ["abc; rm -rf ~", "$(curl evil)", "id`x`", "short", "../../etc", ""] {
+            XCTAssertNil(SessionLinks.claudeResumeCommand(for: agentServer(.claude, id: hostile)), hostile)
+            XCTAssertNil(SessionLinks.codexThreadURL(for: agentServer(.codex, id: hostile)), hostile)
+        }
+    }
+
+    func testOpensACodexChatByItsThread() {
+        let server = agentServer(.codex, id: "01a135f7-cc16-7c71-b3a5-ae9c2406c583")
+        XCTAssertEqual(SessionLinks.codexThreadURL(for: server)?.absoluteString,
+                       "codex://threads/01a135f7-cc16-7c71-b3a5-ae9c2406c583")
+        XCTAssertEqual(SessionLinks.codexResumeCommand(for: server),
+                       "codex resume 01a135f7-cc16-7c71-b3a5-ae9c2406c583")
+        XCTAssertNil(SessionLinks.claudeResumeCommand(for: server))
+    }
+
+    func testReadsTheClaudeSessionFolderFromItsTranscript() {
+        let transcript = Data(#"""
+        {"type":"user","cwd":"/Users/dev/old","message":{}}
+        {"type":"assistant","cwd":"/Users/dev/code/shop","message":{}}
+        """#.utf8)
+        XCTAssertEqual(SessionTitles.latestClaudeDirectory(in: transcript), "/Users/dev/code/shop")
+    }
+
+    func testKnowsWhenTheSessionThatStartedAServerHasEnded() {
+        let attached = detector.attribute(environment: ["CLAUDECODE": "1"], ancestry: ["node vite", "claude"])
+        XCTAssertEqual(attached?.detached, false)
+        let ended = detector.attribute(environment: ["CLAUDECODE": "1"], ancestry: ["node vite"])
+        XCTAssertEqual(ended?.detached, true)
+    }
+
+    func testOffersToClearServersLeftBehindByEndedSessions() {
+        var old = agentServer(.codex, id: "01a135f7-cc16-7c71-b3a5-ae9c2406c583")
+        old.agentDetached = true
+        old.etime = "02:00:00"
+        var fresh = old
+        fresh = LocalServer(port: 4322, pid: 43, command: "node", args: "", cwd: "/x")
+        fresh.kind = .devServer
+        fresh.agent = .claude
+        fresh.agentDetached = true
+        fresh.etime = "05:00"
+        var attached = old
+        attached = LocalServer(port: 4323, pid: 44, command: "node", args: "", cwd: "/y")
+        attached.kind = .devServer
+        attached.agent = .claude
+        attached.etime = "03:00:00"
+
+        let advice = Advisor().build(from: Snapshot(servers: [old, fresh, attached]))
+            .filter { $0.kind == .leftBehind }
+        XCTAssertEqual(advice.count, 1)
+        XCTAssertEqual(advice.first?.id, "leftBehind:4321", "only the one whose session ended over 30 minutes ago")
+        XCTAssertTrue(advice.first?.text.contains("Codex sessions that have ended") ?? false)
+    }
+
+    // MARK: - DDEV
+
+    func testOpensADDEVSiteAtItsOwnHostname() {
+        let output = [
+            "aaa111\tddev-shop-web\tddev/web\tUp 1 hour (healthy)\t127.0.0.1:58610->80/tcp, 127.0.0.1:58609->443/tcp"
+                + "\tddev-shop\tweb\t/Users/dev/code/shop/.ddev\tshop\t/Users/dev/code/shop",
+            "bbb222\tddev-shop-db\tddev/db\tUp 1 hour\t127.0.0.1:55003->3306/tcp"
+                + "\tddev-shop\tdb\t/Users/dev/code/shop/.ddev\tshop\t/Users/dev/code/shop",
+        ].joined(separator: "\n")
+        let runner = FixtureRunner([(exe: "docker", fragment: "ps", output: output)])
+        let docker = DockerSource(runner: runner, fileSystem: StubFileSystem(files: [
+            "/usr/local/bin/docker": "",
+            "/Users/dev/code/shop/.ddev/config.yaml": "name: shop\nproject_tld: test\n",
+        ]), home: DevMachine.home)
+        let ports = docker.publishedPorts()
+        XCTAssertEqual(ports[58610]?.container.siteURL?.absoluteString, "https://shop.test")
+        XCTAssertEqual(ports[58609]?.container.siteURL?.absoluteString, "https://shop.test")
+        XCTAssertNil(ports[55003]?.container.siteURL, "the database container does not serve the site")
+        XCTAssertEqual(ports[55003]?.container.ddevRoot, "/Users/dev/code/shop")
     }
 
     // MARK: - Folders

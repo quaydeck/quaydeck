@@ -7,6 +7,8 @@ let package = Package(
     products: [
         .executable(name: "Quaydeck", targets: ["Quaydeck"]),
         .library(name: "QuaydeckCore", targets: ["QuaydeckCore"]),
+        // For Tools/Screenshots, which renders the real menu from demo data.
+        .library(name: "QuaydeckUI", targets: ["QuaydeckUI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),

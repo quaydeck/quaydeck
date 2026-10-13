@@ -324,8 +324,10 @@ public struct MenuView: View {
             .id(id)
     }
 
-    private func dot(_ colour: Color) -> some View {
+    private func dot(_ colour: Color, _ meaning: String) -> some View {
         Circle().fill(colour).frame(width: 6, height: 6)
+            .help(meaning)
+            .accessibilityLabel(meaning)
     }
 
     private func portLabel(_ port: Int, muted: Bool = false) -> some View {
@@ -349,7 +351,8 @@ public struct MenuView: View {
     private func serverRow(_ server: LocalServer, isDev: Bool) -> some View {
         let id = RowID.server(server.port)
         rowShell(id, tinted: server.suspicious, open: { model.open(server) }) {
-            dot(isDev ? statusColour(server) : (server.unrecognised ? .orange : .secondary.opacity(0.35)))
+            dot(isDev ? statusColour(server) : (server.unrecognised ? .orange : .secondary.opacity(0.35)),
+                isDev ? statusDescription(server) : (server.unrecognised ? "Unrecognised" : "System"))
             portLabel(server.port, muted: !isDev)
             if isDev {
                 names(server.project ?? server.folder ?? server.command, devHint(server))
@@ -357,7 +360,8 @@ public struct MenuView: View {
                 names(server.noiseTitle, server.unrecognised ? "unrecognised" : nil)
             }
             Spacer(minLength: 4)
-            trailing(id, quit: { model.quit(server) }, restart: isDev ? { restart(server) } : nil) {
+            trailing(id, quit: { model.quit(server) }, restart: isDev ? { restart(server) } : nil,
+                     session: sessionAction(server)) {
                 glyphs(server, isDev: isDev)
             }
         } menu: {
@@ -380,6 +384,7 @@ public struct MenuView: View {
             if server.isNew { tag("new", .blue) }
             if server.isDuplicate { tag("×\(server.duplicateCount)", .orange) }
             if server.busy { tag("busy", .red) }
+            if server.leftBehind { symbol("moon.zzz", .secondary, "Its session has ended") }
             if server.exposed { symbol("globe", .orange, "Reachable on your local network") }
             if !isDev && server.unrecognised { symbol("exclamationmark.triangle.fill", .orange, "Unrecognised") }
         }
@@ -389,8 +394,10 @@ public struct MenuView: View {
     private func containerRow(_ group: ContainerGroup) -> some View {
         let id = RowID.container(group.id)
         let primary = group.primary
-        rowShell(id, open: { primary.probeable ? model.open(group) : model.copyAddress(primary) }) {
-            dot(containerColour(group))
+        rowShell(id, open: {
+            primary.probeable || group.container.siteURL != nil ? model.open(group) : model.copyAddress(primary)
+        }) {
+            dot(containerColour(group), group.container.status)
             portLabel(primary.port)
             names(group.title, group.service ?? group.container.imageLabel)
             Spacer(minLength: 4)
@@ -426,6 +433,7 @@ public struct MenuView: View {
     @ViewBuilder
     private func trailing<Glyphs: View>(_ id: RowID, quit: @escaping () -> Void,
                                         restart: (() -> Void)?, quitVerb: String = "Quit?",
+                                        session: (help: String, action: () -> Void)? = nil,
                                         @ViewBuilder glyphs: () -> Glyphs) -> some View {
         if pendingQuit == id {
             HStack(spacing: 6) {
@@ -437,6 +445,9 @@ public struct MenuView: View {
             }
         } else if hovered == id {
             HStack(spacing: 8) {
+                if let session {
+                    iconButton("text.bubble", colour: .secondary, help: session.help, action: session.action)
+                }
                 if let restart {
                     iconButton("arrow.clockwise", colour: .secondary, help: "Restart", action: restart)
                 }
@@ -445,6 +456,19 @@ public struct MenuView: View {
         } else {
             glyphs()
         }
+    }
+
+    /// The way back to the chat or session that started a server, if there is one.
+    private func sessionAction(_ server: LocalServer) -> (help: String, action: () -> Void)? {
+        if SessionLinks.codexThreadURL(for: server) != nil {
+            return ("Open the chat in Codex", { model.openSession(of: server) })
+        }
+        if SessionLinks.claudeResumeCommand(for: server) != nil {
+            return ("Resume the Claude session in Terminal", {
+                if !model.openSession(of: server) { restartFailed = true }
+            })
+        }
+        return nil
     }
 
     private func restart(_ server: LocalServer) {
@@ -459,6 +483,12 @@ public struct MenuView: View {
         if server.erroring { return .orange }
         if server.respondsHTTP { return .green }
         return .secondary.opacity(0.4)
+    }
+
+    private func statusDescription(_ server: LocalServer) -> String {
+        if server.erroring { return "Answering with HTTP \(server.httpStatus ?? 500)" }
+        if server.respondsHTTP { return "Answering" }
+        return "Port open, no HTTP answer"
     }
 
     private func containerColour(_ group: ContainerGroup) -> Color {
@@ -519,7 +549,9 @@ public struct MenuView: View {
     @ViewBuilder
     private func containerDetail(_ group: ContainerGroup) -> some View {
         let primary = group.primary
-        if primary.probeable {
+        if let site = group.container.siteURL {
+            detailLine(site.absoluteString + "  · DDEV", strong: true)
+        } else if primary.probeable {
             detailLine(primary.url + (primary.title.map { "  “\($0)”" } ?? ""), strong: true)
         } else {
             detailLine("localhost:\(primary.port) · \(group.container.imageLabel)", strong: true)
@@ -532,8 +564,9 @@ public struct MenuView: View {
 
     private func origin(of server: LocalServer) -> String {
         guard let agent = server.agent else { return "started by you" }
-        guard let session = server.agentSession else { return "started by \(agent.displayName)" }
-        return "\(agent.displayName): “\(session)”"
+        let ended = server.agentDetached ? " (session ended)" : ""
+        guard let session = server.agentSession else { return "started by \(agent.displayName)\(ended)" }
+        return "\(agent.displayName): “\(session)”\(ended)"
     }
 
     private func detailLine(_ text: String, strong: Bool = false, middle: Bool = false) -> some View {
@@ -556,6 +589,17 @@ public struct MenuView: View {
     private func serverMenu(_ server: LocalServer, isDev: Bool) -> some View {
         Button("Open \(server.url)") { model.open(server) }
         Button("Copy URL") { model.copyURL(server) }
+        if SessionLinks.codexThreadURL(for: server) != nil {
+            Divider()
+            Button("Open Chat in Codex") { model.openSession(of: server) }
+            Button("Copy “codex resume” Command") { model.copySessionCommand(of: server) }
+        } else if SessionLinks.claudeResumeCommand(for: server) != nil {
+            Divider()
+            Button("Resume Claude Session in Terminal") {
+                if !model.openSession(of: server) { restartFailed = true }
+            }
+            Button("Copy “claude --resume” Command") { model.copySessionCommand(of: server) }
+        }
         if server.projectPath != nil {
             if isDev {
                 Button(server.pinned ? "Unpin" : "Pin to top") { model.togglePin(server) }
@@ -575,6 +619,9 @@ public struct MenuView: View {
 
     @ViewBuilder
     private func containerMenu(_ group: ContainerGroup) -> some View {
+        if let site = group.container.siteURL {
+            Button("Open \(site.absoluteString)") { model.open(group) }
+        }
         ForEach(group.ports) { port in
             Button("Open \(port.url)" + (port.containerPort.map { " (→ \($0))" } ?? "")) {
                 model.open(port)
@@ -782,10 +829,12 @@ public struct MenuView: View {
                             action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).font(.system(size: 11)) }
             .buttonStyle(.plain).foregroundStyle(colour).help(help)
+            .accessibilityLabel(help)
     }
 
     private func symbol(_ name: String, _ colour: Color, _ help: String) -> some View {
         Image(systemName: name).font(.system(size: 9)).foregroundStyle(colour).help(help)
+            .accessibilityLabel(help)
     }
 
     private func tag(_ text: String, _ colour: Color) -> some View {

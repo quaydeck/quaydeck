@@ -50,8 +50,6 @@ or build it yourself:
 ```sh
 git clone https://github.com/quaydeck/quaydeck
 cd quaydeck
-swift Scripts/make-icon.swift build/Quaydeck.iconset
-iconutil -c icns build/Quaydeck.iconset -o Resources/AppIcon.icns
 ./Scripts/build-app.sh --install
 ```
 

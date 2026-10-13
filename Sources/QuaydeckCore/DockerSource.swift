@@ -11,10 +11,17 @@ public struct ContainerInfo: Hashable, Sendable {
     public let composeService: String?
     /// The directory `docker compose up` ran in, when compose started it.
     public let composeDirectory: String?
+    /// DDEV labels its containers with the site name and the project folder.
+    public let ddevSite: String?
+    public let ddevRoot: String?
+    /// Where the site really lives. A DDEV project is served at its own hostname
+    /// through DDEV's router; its raw port answers with nothing useful.
+    public var siteURL: URL?
 
     public init(id: String, name: String, image: String, status: String,
                 composeProject: String? = nil, composeService: String? = nil,
-                composeDirectory: String? = nil) {
+                composeDirectory: String? = nil, ddevSite: String? = nil,
+                ddevRoot: String? = nil, siteURL: URL? = nil) {
         self.id = id
         self.name = name
         self.image = image
@@ -22,6 +29,9 @@ public struct ContainerInfo: Hashable, Sendable {
         self.composeProject = composeProject
         self.composeService = composeService
         self.composeDirectory = composeDirectory
+        self.ddevSite = ddevSite
+        self.ddevRoot = ddevRoot
+        self.siteURL = siteURL
     }
 
     /// A locally built image has no name, only a digest: "sha256:2241a1b2…" reads
@@ -73,6 +83,8 @@ public struct DockerSource: Sendable {
         let candidates = [
             "/usr/local/bin/docker",
             "/opt/homebrew/bin/docker",
+            // Docker Desktop's per-user install, chosen when the user is not an admin.
+            home + "/.docker/bin/docker",
             "/Applications/Docker.app/Contents/Resources/bin/docker",
             home + "/.orbstack/bin/docker",
             "/Applications/OrbStack.app/Contents/MacOS/xbin/docker",
@@ -89,9 +101,44 @@ public struct DockerSource: Sendable {
             #"{{.Label "com.docker.compose.project"}}"#,
             #"{{.Label "com.docker.compose.service"}}"#,
             #"{{.Label "com.docker.compose.project.working_dir"}}"#,
+            #"{{.Label "com.ddev.site-name"}}"#,
+            #"{{.Label "com.ddev.approot"}}"#,
         ].joined(separator: "\\t")
         let output = runner.run(cli, ["ps", "--no-trunc", "--format", format], timeout: Self.timeout)
-        return Self.parse(output)
+        var result = Self.parse(output)
+        // Only the container that serves the site gets its URL; DDEV labels the
+        // database container with the same site name.
+        let webContainers = Set(result.values.filter { [80, 443].contains($0.containerPort) }.map(\.container.id))
+        var urls: [String: URL?] = [:]
+        for (port, mapping) in result {
+            guard let site = mapping.container.ddevSite, webContainers.contains(mapping.container.id) else { continue }
+            let url = urls[mapping.container.id] ?? Self.ddevURL(site: site, root: mapping.container.ddevRoot,
+                                                                 fileSystem: fileSystem)
+            urls[mapping.container.id] = url
+            var container = mapping.container
+            container.siteURL = url
+            result[port] = PublishedPort(container: container, containerPort: mapping.containerPort)
+        }
+        return result
+    }
+
+    /// `https://<site>.ddev.site`, or the project's own `project_tld` when its
+    /// .ddev/config.yaml sets one.
+    static func ddevURL(site: String, root: String?, fileSystem: FileSystemProbe) -> URL? {
+        let hostnameSafe: (String) -> Bool = { text in
+            !text.isEmpty && text.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == ".") }
+        }
+        guard hostnameSafe(site) else { return nil }
+        var tld = "ddev.site"
+        if let root, let data = fileSystem.contents(at: root + "/.ddev/config.yaml"),
+           let text = String(data: data, encoding: .utf8) {
+            for line in text.split(separator: "\n") where line.hasPrefix("project_tld:") {
+                let value = line.dropFirst("project_tld:".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+                if hostnameSafe(value) { tld = value }
+            }
+        }
+        return URL(string: "https://\(site).\(tld)")
     }
 
     // MARK: - Parsing
@@ -114,7 +161,9 @@ public struct DockerSource: Sendable {
                 status: fields[3],
                 composeProject: field(5),
                 composeService: field(6),
-                composeDirectory: field(7)
+                composeDirectory: field(7),
+                ddevSite: field(8),
+                ddevRoot: field(9)
             )
             for mapping in parsePorts(fields[4]) where result[mapping.host] == nil {
                 result[mapping.host] = PublishedPort(container: container, containerPort: mapping.container)

@@ -69,7 +69,7 @@ cp "$BINARY" "$CONTENTS/MacOS/$NAME"
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Resources/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
 else
-  say "  no AppIcon.icns yet, run: swift Scripts/make-icon.swift build/Quaydeck.iconset"
+  say "  no AppIcon.icns yet, run: ./Scripts/make-icon.sh"
 fi
 
 SPARKLE="$(find "$ROOT/.build/artifacts" -maxdepth 6 -name 'Sparkle.framework' -type d 2>/dev/null | head -1)"

@@ -50,7 +50,8 @@ struct QuaydeckApp: App {
     /// circles up to 50, so anything beyond that clamps.
     private var menuBarSymbol: String {
         let count = model.snapshot.devServers.count
-        guard count > 0 else { return "sailboat" }
+        // A porthole with water in it, like the app icon.
+        guard count > 0 else { return "circle.bottomhalf.filled" }
         return "\(min(count, 50)).circle.fill"
     }
 }

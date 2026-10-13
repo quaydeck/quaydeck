@@ -15,11 +15,29 @@ public final class GitInspector: @unchecked Sendable {
     private let ttl: TimeInterval
     private let lock = NSLock()
     private var cache: [String: (status: Status, at: Date)] = [:]
-    private let gitPath = "/usr/bin/git"
+    /// Nil when this Mac has no usable git, in which case rows simply show no branch.
+    private let gitPath: String?
 
-    public init(runner: CommandRunner, ttl: TimeInterval = 8) {
+    public init(runner: CommandRunner, ttl: TimeInterval = 8, gitPath: String? = "/usr/bin/git") {
         self.runner = runner
         self.ttl = ttl
+        self.gitPath = gitPath
+    }
+
+    /// A git that will actually run. `/usr/bin/git` is only Apple's shim: on a Mac
+    /// without the developer tools, running it opens the "install command line
+    /// developer tools" dialog, and a scan every few seconds would open it every few
+    /// seconds. So it is used only when the tools it dispatches to are installed.
+    public static func locate(fileSystem: FileSystemProbe) -> String? {
+        for direct in ["/opt/homebrew/bin/git", "/usr/local/bin/git"] where fileSystem.fileExists(at: direct) {
+            return direct
+        }
+        let toolchains = [
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+            "/Applications/Xcode-beta.app/Contents/Developer/usr/bin/git",
+        ]
+        return toolchains.contains(where: fileSystem.fileExists) ? "/usr/bin/git" : nil
     }
 
     /// `maxAge` overrides the default lifetime for one call: long while the menu is
@@ -32,6 +50,7 @@ public final class GitInspector: @unchecked Sendable {
         }
         lock.unlock()
 
+        guard let gitPath else { return .unknown }
         // One fork for both answers. -uno: ignore untracked files, or node_modules and
         // build output would mark almost every project dirty forever.
         let output = runner.run(gitPath, ["-C", path, "status", "--porcelain=v2", "--branch", "-uno"])

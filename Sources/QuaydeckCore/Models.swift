@@ -43,6 +43,20 @@ public struct LocalServer: Identifiable, Hashable, Sendable {
     /// The title of the agent session that started it: the Codex chat name or the
     /// Claude Code session title.
     public var agentSession: String?
+    /// Claude Code's session id or Codex's thread id.
+    public var agentSessionID: String?
+    /// Where that agent keeps its data, when not the default (CLAUDE_CONFIG_DIR).
+    public var agentHome: String?
+    /// The folder the Claude session runs in.
+    public var agentSessionDirectory: String?
+    /// The session that started it has ended; the server kept running.
+    public var agentDetached: Bool = false
+
+    /// Still running 30 minutes after the session that started it ended: almost always
+    /// a preview nobody is looking at any more.
+    public var leftBehind: Bool {
+        isDevServer && agent != nil && agentDetached && (uptimeSeconds ?? 0) > 1_800
+    }
     /// For a server with no project manifest: the folder it serves, so the row still
     /// says something more useful than "Python".
     public var folder: String?
@@ -237,6 +251,10 @@ public struct ContainerGroup: Identifiable, Hashable, Sendable {
     }
 
     public var exposed: Bool { ports.contains(where: \.exposed) }
+
+    /// The address to open: the site's own hostname when it has one (DDEV), else the
+    /// primary port.
+    public var openURL: String { container.siteURL?.absoluteString ?? primary.url }
 
     /// ":58610→80  :58609→443"
     public var portsText: String {
